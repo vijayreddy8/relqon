@@ -800,3 +800,47 @@ def test_impact_analysis_ignores_absolute_and_traversal_paths():
     assert len(ignored_reasons) == 2
     assert any("../outside/Dockerfile" in reason for reason in ignored_reasons)
     assert any("/tmp/unsafe.py" in reason for reason in ignored_reasons)
+
+
+
+def test_terraform_fmt_timeout_returns_structured_failure(tmp_path, monkeypatch):
+    import subprocess
+    import relqon.cli as cli
+
+    terraform_file = tmp_path / "infra" / "main.tf"
+    terraform_file.parent.mkdir()
+    terraform_file.write_text("terraform {}\\n", encoding="utf-8")
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/terraform")
+
+    def timeout_fmt(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="terraform fmt", timeout=120)
+
+    monkeypatch.setattr(cli.subprocess, "run", timeout_fmt)
+
+    result = cli.validate_terraform(tmp_path, ["infra/main.tf"])
+
+    assert result["status"] == "FAIL"
+    assert "timed out" in result["error"].lower()
+    assert result["steps"][0]["name"] == "terraform fmt -check -diff"
+    assert result["steps"][0]["status"] == "FAIL"
+
+
+def test_terraform_fmt_oserror_returns_structured_failure(tmp_path, monkeypatch):
+    import relqon.cli as cli
+
+    terraform_file = tmp_path / "infra" / "main.tf"
+    terraform_file.parent.mkdir()
+    terraform_file.write_text("terraform {}\\n", encoding="utf-8")
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/terraform")
+
+    def fail_fmt(*args, **kwargs):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(cli.subprocess, "run", fail_fmt)
+
+    result = cli.validate_terraform(tmp_path, ["infra/main.tf"])
+
+    assert result["status"] == "FAIL"
+    assert "permission denied" in result["error"].lower()
+    assert result["steps"][0]["name"] == "terraform fmt -check -diff"
+    assert result["steps"][0]["status"] == "FAIL"
