@@ -67,6 +67,40 @@ flowchart TD
 
 **In short:** Relqon detects changes, selects relevant validations, collects the results, and produces a report with recovery guidance. In GitHub Actions, the run also provides a readable summary and a downloadable report artifact. Checks may be marked `SKIPPED` when a required external tool is unavailable.
 
+## Quick start
+
+Relqon supports Python 3.10+ on Windows, Ubuntu/Linux, and macOS. The setup scripts create a local virtual environment, upgrade \`pip\`, and install Relqon with its test dependencies so the \`relqon\` command is registered in that environment.
+
+**Windows (PowerShell)**
+
+\`\`\`powershell
+git clone https://github.com/vijayreddy8/relqon.git
+cd relqon
+.\scripts\setup.ps1
+.\.venv\Scripts\relqon.exe run .
+\`\`\`
+
+If PowerShell blocks the setup script, run it with a one-time policy override:
+
+\`\`\`powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
+\`\`\`
+
+**Ubuntu / other Linux**
+
+\`\`\`bash
+git clone https://github.com/vijayreddy8/relqon.git
+cd relqon
+sh scripts/setup.sh
+./.venv/bin/relqon run .
+\`\`\`
+
+**macOS**
+
+Use the same commands as Ubuntu/Linux. Make sure Python 3.10+ is installed.
+
+Using the explicit executable path (\`.venv/bin/relqon\` on Linux/macOS or \`.venv\Scripts\relqon.exe\` on Windows) avoids the common “command not found” issue caused by an inactive virtual environment. If installation fails, keep the full pip error output when troubleshooting.
+
 ## Requirements
 
 - Python 3.10+ (use the version configured by project CI if newer).
