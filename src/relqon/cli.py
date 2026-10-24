@@ -7,7 +7,7 @@ import sys
 import tempfile
 import time
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 
 def _decode_git_status_path(filename: str) -> str:
@@ -128,11 +128,19 @@ def analyse_impact(changed_files: list[str]) -> dict:
 
         # Explicit and Git-reported paths must stay project-relative.
         # Reject absolute paths and traversal before they influence validators.
+        # Interpret paths from both POSIX and Windows hosts consistently.
+        # A POSIX-style absolute path ("/tmp/file") is not considered absolute
+        # by pathlib.Path on Windows, and a Windows drive path may not be
+        # absolute on Linux. Reject both forms before path classification.
+        normalized = filename.strip()
         if (
             path.is_absolute()
+            or PureWindowsPath(filename).is_absolute()
+            or normalized.startswith(("/", "\\\\"))
             or ".." in path.parts
-            or not filename.strip()
-            or filename.strip() in {".", ""}
+            or ".." in PureWindowsPath(filename).parts
+            or not normalized
+            or normalized in {".", ""}
         ):
             reasons.append(
                 f"{filename}: path is outside the project-relative boundary or empty and was ignored."
