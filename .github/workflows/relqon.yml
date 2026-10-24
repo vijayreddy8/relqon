@@ -42,4 +42,4 @@ jobs:
           terraform validate -no-color
 
       - name: Run Relqon validation
-        run: python src/relqon/cli.py run .
+        run: python src/relqon/cli.py run . --changed-file tests/fixtures/terraform_valid/main.tf
