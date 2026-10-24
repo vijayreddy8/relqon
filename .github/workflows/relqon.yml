@@ -43,3 +43,60 @@ jobs:
 
       - name: Run Relqon validation
         run: python src/relqon/cli.py run . --changed-file tests/fixtures/terraform_valid/main.tf
+
+      - name: Assert Terraform result in JSON report
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report_path = Path("reports/validation-report.json")
+          if not report_path.is_file():
+              raise SystemExit("Relqon JSON validation report was not generated.")
+
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          checks = report.get("checks", [])
+          terraform = next(
+              (check for check in checks if check.get("name") == "Terraform validation"),
+              None,
+          )
+          if terraform is None:
+              raise SystemExit("Terraform validation result is missing from the JSON report.")
+          if terraform.get("status") != "PASS":
+              raise SystemExit(
+                  "Terraform validation did not pass: "
+                  + json.dumps(terraform, indent=2)
+              )
+
+          step_statuses = {
+              step.get("name"): step.get("status")
+              for step in terraform.get("steps", [])
+          }
+          required_steps = {
+              "terraform fmt -check -diff",
+              "terraform init -backend=false",
+              "terraform validate",
+          }
+          missing = required_steps - step_statuses.keys()
+          failed = [name for name in required_steps if step_statuses.get(name) != "PASS"]
+          if missing or failed:
+              raise SystemExit(
+                  f"Terraform report is incomplete. Missing={sorted(missing)}, "
+                  f"not passing={sorted(failed)}"
+              )
+
+          fixture = "tests/fixtures/terraform_valid/main.tf"
+          if fixture not in terraform.get("files_checked", []):
+              raise SystemExit("Terraform fixture is not listed in files_checked.")
+
+          print("Terraform JSON report verified: fmt, init, validate all PASS.")
+          print(f"Report overall status: {report.get('overall_status')}")
+          PY
+
+      - name: Upload validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relqon-validation-report
+          path: reports/validation-report.json
+          if-no-files-found: warn
