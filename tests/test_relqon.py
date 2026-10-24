@@ -376,3 +376,60 @@ def test_recovery_guidance_for_python_test_failure():
 
     assert any("traceback" in item.lower() or "python" in item.lower() for item in result["recovery_guidance"])
 
+def test_python_validation_detects_invalid_syntax(tmp_path):
+    from relqon.cli import validate_python
+
+    broken = tmp_path / "src" / "broken.py"
+    broken.parent.mkdir()
+    broken.write_text("def broken_function(:\\n", encoding="utf-8")
+
+    result = validate_python(tmp_path, ["src/broken.py"])
+
+    assert result["status"] == "FAIL"
+    assert "SyntaxError" in result["error"]
+
+
+def test_docker_validation_detects_build_failure(tmp_path, monkeypatch):
+    import relqon.cli as cli
+
+    (tmp_path / "Dockerfile").write_text("FROM scratch\\n", encoding="utf-8")
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/docker" if name == "docker" else None)
+
+    class FakeResult:
+        returncode = 1
+        stdout = ""
+        stderr = "intentional build failure"
+
+    monkeypatch.setattr(cli.subprocess, "run", lambda *args, **kwargs: FakeResult())
+
+    result = cli.validate_docker(tmp_path)
+
+    assert result["status"] == "FAIL"
+    assert "intentional build failure" in result["error"]
+
+
+def test_docker_validation_reports_missing_cli_as_skipped(tmp_path, monkeypatch):
+    import relqon.cli as cli
+
+    (tmp_path / "Dockerfile").write_text("FROM scratch\\n", encoding="utf-8")
+    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
+
+    result = cli.validate_docker(tmp_path)
+
+    assert result["status"] == "SKIPPED"
+    assert "not installed" in result["error"]
+
+
+def test_failure_recovery_guidance_is_added_to_failed_report_check():
+    from relqon.cli import add_recovery_guidance
+
+    check = {
+        "name": "Docker build validation",
+        "status": "FAIL",
+        "error": "Docker build failed.",
+    }
+    result = add_recovery_guidance(check)
+
+    assert result["recovery_guidance"]
+    assert any("docker build" in item.lower() for item in result["recovery_guidance"])
+
