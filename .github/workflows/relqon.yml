@@ -100,3 +100,102 @@ jobs:
           name: relqon-validation-report
           path: reports/validation-report.json
           if-no-files-found: warn
+
+      - name: Publish validation summary
+        if: always()
+        env:
+          REPORT_PATH: reports/validation-report.json
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path(os.environ["REPORT_PATH"])
+          summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
+
+          def cell(value):
+              return str(value if value is not None else "—").replace("|", "\\|").replace("\n", " ")
+
+          lines = ["## Relqon Validation Report", ""]
+
+          if not report_path.is_file():
+              lines.extend([
+                  "**Status:** Report unavailable",
+                  "",
+                  "Relqon did not produce reports/validation-report.json. Check earlier workflow steps for the original failure.",
+              ])
+              summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+              print("No Relqon report found; published a diagnostic summary.")
+              raise SystemExit(0)
+
+          try:
+              report = json.loads(report_path.read_text(encoding="utf-8"))
+          except (OSError, json.JSONDecodeError) as exc:
+              lines.extend(["**Status:** Report could not be parsed", "", f"Details: {cell(exc)}"])
+              summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+              print("Relqon report could not be parsed; published a diagnostic summary.")
+              raise SystemExit(0)
+
+          overall = report.get("overall_status", "UNKNOWN")
+          counts = report.get("summary", {})
+          lines.extend([
+              f"**Overall status:** {cell(overall)}",
+              "",
+              "| Metric | Value |",
+              "|---|---:|",
+              f"| Passed checks | {cell(counts.get('passed', 0))} |",
+              f"| Failed checks | {cell(counts.get('failed', 0))} |",
+              f"| Skipped checks | {cell(counts.get('skipped', 0))} |",
+              f"| Duration | {cell(report.get('duration_seconds', 0))} seconds |",
+              "",
+              "### Changed files",
+              "",
+          ])
+
+          changed_files = report.get("changed_files", [])
+          if changed_files:
+              lines.extend(f"- {cell(filename)}" for filename in changed_files)
+          else:
+              lines.append("_No changed files detected._")
+
+          impact = report.get("impact_analysis", {})
+          reasons = impact.get("reasons", [])
+          if reasons:
+              lines.extend(["", "### Impact analysis", ""])
+              lines.extend(f"- {cell(reason)}" for reason in reasons)
+
+          lines.extend([
+              "",
+              "### Validation checks",
+              "",
+              "| Check | Status | Duration (s) | Details |",
+              "|---|---|---:|---|",
+          ])
+
+          for check in report.get("checks", []):
+              name = cell(check.get("name", "Unnamed check"))
+              status = cell(check.get("status", "UNKNOWN"))
+              duration = cell(check.get("duration_seconds", 0))
+              details = cell(check.get("error") or check.get("details") or "—")
+              lines.append(f"| {name} | {status} | {duration} | {details} |")
+
+          guidance = [
+              (check.get("name", "Check"), item)
+              for check in report.get("checks", [])
+              for item in check.get("recovery_guidance", [])
+          ]
+          if guidance:
+              lines.extend(["", "### Recovery guidance", ""])
+              for check_name, item in guidance:
+                  lines.append(f"- **{cell(check_name)}:** {cell(item)}")
+
+          lines.extend([
+              "",
+              "### Full report",
+              "",
+              "Download the relqon-validation-report artifact for the machine-readable JSON report.",
+          ])
+          summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print(f"Published Relqon summary: {overall}")
+          PY
