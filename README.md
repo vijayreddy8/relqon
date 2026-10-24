@@ -5,6 +5,7 @@
 ## What it checks
 
 - **Python** — syntax validation for changed production Python files.
+- **Node.js / TypeScript** — runs `npm run build` for changed JavaScript/TypeScript files or package manifests, when the nearest package declares a build script and dependencies are installed.
 - **Docker** — build validation when Docker configuration changes.
 - **Kubernetes** — validation for changed Kubernetes manifests and Helm metadata.
 - **Terraform** — formatting and configuration validation for changed Terraform files.
