@@ -10,6 +10,46 @@ from datetime import datetime
 from pathlib import Path
 
 
+def _decode_git_status_path(filename: str) -> str:
+    """Decode Git's quoted path format for unusual filenames."""
+    if len(filename) >= 2 and filename.startswith('"') and filename.endswith('"'):
+        raw = filename[1:-1]
+        decoded = []
+        index = 0
+        escapes = {
+            "a": "\\a",
+            "b": "\\b",
+            "t": "\\t",
+            "n": "\\n",
+            "v": "\\v",
+            "f": "\\f",
+            "r": "\\r",
+            '"': '"',
+            "\\\\": "\\\\",
+        }
+        while index < len(raw):
+            char = raw[index]
+            if char != "\\\\" or index + 1 >= len(raw):
+                decoded.append(char)
+                index += 1
+                continue
+            next_char = raw[index + 1]
+            if next_char in escapes:
+                decoded.append(escapes[next_char])
+                index += 2
+            elif next_char in "01234567":
+                end = index + 2
+                while end < min(index + 4, len(raw)) and raw[end] in "01234567":
+                    end += 1
+                decoded.append(chr(int(raw[index + 1:end], 8)))
+                index = end
+            else:
+                decoded.append(next_char)
+                index += 2
+        return "".join(decoded)
+    return filename
+
+
 def get_changed_files(project_path: Path) -> list[str]:
     """Get changed, staged, and untracked files from Git."""
 
@@ -39,12 +79,15 @@ def get_changed_files(project_path: Path) -> list[str]:
         if len(line) < 4:
             continue
 
-        filename = line[3:].strip()
+        # Git quotes unusual filenames (spaces, tabs, newlines, non-ASCII)
+        # using C-style escapes unless core.quotePath is disabled.
+        status_path = line[3:].strip()
 
-        # Handle Git rename output.
-        if " -> " in filename:
-            filename = filename.split(" -> ")[-1]
+        # Handle rename/copy status output: "old path -> new path".
+        if " -> " in status_path:
+            status_path = status_path.split(" -> ", 1)[-1]
 
+        filename = _decode_git_status_path(status_path)
         filename = filename.replace("\\", "/")
 
         if filename:
