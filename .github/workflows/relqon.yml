@@ -23,8 +23,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install pytest
-        run: python -m pip install pytest pyyaml
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
 
       - name: Run unit tests
         run: python -m pytest tests/ -v --ignore=tests/python_validation/broken_test.py
