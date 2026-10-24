@@ -36,7 +36,7 @@ python src/relqon/cli.py run .
 To include specific changed files explicitly:
 
 ```bash
-relqon run . --changed-file src/relqon/cli.py --changed-file infra/main.tf
+python src/relqon/cli.py run . --changed-file src/relqon/cli.py --changed-file infra/main.tf
 ```
 
 Relqon also detects staged, unstaged, and untracked files using Git. Explicit paths should be project-relative.
