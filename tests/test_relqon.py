@@ -863,8 +863,8 @@ def test_impact_analysis_ignores_empty_and_dot_paths():
 def test_decode_git_status_path_handles_quoted_special_characters():
     from relqon.cli import _decode_git_status_path
 
-    assert _decode_git_status_path('"folder/space\\040name.py"') == "folder/space name.py"
-    assert _decode_git_status_path('"folder/tab\\tname.py"') == "folder/tab\\tname.py"
+    assert _decode_git_status_path('"folder/space\040name.py"') == "folder/space name.py"
+    assert _decode_git_status_path('"folder/tab\tname.py"') == "folder/tab\tname.py"
     assert _decode_git_status_path("src/plain.py") == "src/plain.py"
 
 
@@ -877,7 +877,7 @@ def test_get_changed_files_decodes_quoted_filename(tmp_path, monkeypatch):
         "run",
         lambda *args, **kwargs: subprocess.CompletedProcess(
             args=["git", "status"], returncode=0,
-            stdout=' M "src/file\\040name.py"\\n', stderr=""
+            stdout=' M "src/file\040name.py"\n', stderr=""
         ),
     )
 
