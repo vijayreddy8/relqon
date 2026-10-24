@@ -719,3 +719,36 @@ def test_cli_skipped_validation_returns_two_and_reports_skip_guidance(tmp_path, 
     assert terraform_check["recovery_guidance"]
     assert any("install terraform" in item.lower()
                for item in terraform_check["recovery_guidance"])
+
+
+def test_cli_invalid_project_path_returns_one_without_report(tmp_path, monkeypatch, capsys):
+    import relqon.cli as cli
+
+    missing_project = tmp_path / "does-not-exist"
+    monkeypatch.setattr(
+        cli.sys,
+        "argv",
+        ["relqon", "run", str(missing_project)],
+    )
+
+    exit_code = cli.main()
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "Project directory not found" in output
+    assert not (missing_project / "reports" / "validation-report.json").exists()
+
+
+def test_python_validation_rejects_path_outside_project(tmp_path):
+    from relqon.cli import validate_python
+
+    outside_file = tmp_path.parent / "outside_relqon_file.py"
+    outside_file.write_text("VALUE = 1\\n", encoding="utf-8")
+    try:
+        result = validate_python(tmp_path, ["../outside_relqon_file.py"])
+    finally:
+        outside_file.unlink(missing_ok=True)
+
+    assert result["status"] == "FAIL"
+    assert "outside the project directory" in result["error"]
+    assert result["files_checked"] == []
