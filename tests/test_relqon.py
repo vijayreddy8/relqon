@@ -304,3 +304,39 @@ def test_terraform_validation_skips_when_cli_missing(tmp_path, monkeypatch):
     assert result["status"] == "SKIPPED"
     assert "not installed" in result["error"]
 
+def test_recovery_guidance_for_terraform_format_failure():
+    from relqon.cli import add_recovery_guidance
+
+    result = add_recovery_guidance({
+        "name": "Terraform validation",
+        "status": "FAIL",
+        "error": "Terraform formatting check failed.",
+    })
+
+    assert result["status"] == "FAIL"
+    assert any("terraform fmt" in item for item in result["recovery_guidance"])
+
+
+def test_recovery_guidance_for_missing_terraform_cli():
+    from relqon.cli import add_recovery_guidance
+
+    result = add_recovery_guidance({
+        "name": "Terraform validation",
+        "status": "SKIPPED",
+        "error": "Terraform CLI is not installed or not in PATH.",
+    })
+
+    assert any("Install Terraform CLI" in item for item in result["recovery_guidance"])
+
+
+def test_recovery_guidance_does_not_change_successful_checks():
+    from relqon.cli import add_recovery_guidance
+
+    result = add_recovery_guidance({
+        "name": "Terraform validation",
+        "status": "PASS",
+        "error": None,
+    })
+
+    assert "recovery_guidance" not in result
+
