@@ -882,3 +882,12 @@ def test_get_changed_files_decodes_quoted_filename(tmp_path, monkeypatch):
     )
 
     assert cli.get_changed_files(tmp_path) == ["src/file name.py"]
+
+
+
+def test_decode_git_status_path_handles_utf8_octal_escapes():
+    from relqon.cli import _decode_git_status_path
+
+    # Git represents the UTF-8 bytes for "café.py" as octal escapes.
+    assert _decode_git_status_path('"caf\303\251.py"') == "café.py"
+    assert _decode_git_status_path('"文件.py"') == "文件.py"
