@@ -52,6 +52,59 @@ def test_multiple_changes_trigger_multiple_checks():
 
 
 
+def test_typescript_file_triggers_node_check():
+    result = analyse_impact(["backend/src/server.ts"])
+    assert "node_check" in result["checks"]
+
+
+def test_frontend_package_manifest_triggers_node_check():
+    result = analyse_impact(["frontend/package.json"])
+    assert "node_check" in result["checks"]
+
+
+def test_node_validator_runs_build_for_changed_package(tmp_path, monkeypatch):
+    import json
+    import relqon.cli as cli
+
+    package = tmp_path / "frontend"
+    package.mkdir()
+    (package / "node_modules").mkdir()
+    (package / "package.json").write_text(
+        json.dumps({"name": "demo", "scripts": {"build": "tsc -b"}}),
+        encoding="utf-8",
+    )
+
+    class Result:
+        returncode = 0
+        stdout = "> demo build\\n> tsc -b\\n"
+        stderr = ""
+
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/npm")
+    monkeypatch.setattr(cli.subprocess, "run", lambda *args, **kwargs: Result())
+
+    result = cli.validate_node(tmp_path, ["frontend/src/App.tsx"])
+    assert result["status"] == "PASS"
+    assert result["files_checked"] == ["frontend"]
+    assert result["steps"][0]["status"] == "PASS"
+
+
+def test_node_validator_skips_when_dependencies_missing(tmp_path, monkeypatch):
+    import json
+    import relqon.cli as cli
+
+    package = tmp_path / "backend"
+    package.mkdir()
+    (package / "package.json").write_text(
+        json.dumps({"name": "demo-api", "scripts": {"build": "tsc"}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/npm")
+
+    result = cli.validate_node(tmp_path, ["backend/src/server.ts"])
+    assert result["status"] == "SKIPPED"
+    assert "node_modules is missing" in result["steps"][0]["details"]
+
+
 def test_kubernetes_yaml_validates_manifest_structure(tmp_path, monkeypatch):
     import relqon.cli as cli
     validate_kubernetes = cli.validate_kubernetes
