@@ -782,3 +782,17 @@ def test_get_changed_files_handles_git_status_timeout(tmp_path, monkeypatch, cap
 
     assert changed_files == []
     assert "timed out" in capsys.readouterr().out.lower()
+
+
+def test_impact_analysis_ignores_absolute_and_traversal_paths():
+    from relqon.cli import analyse_impact
+
+    result = analyse_impact([
+        "../outside/Dockerfile",
+        "/tmp/unsafe.py",
+        "src/relqon/safe.py",
+    ])
+
+    assert result["checks"] == ["python_check"]
+    assert len(result["reasons"]) == 1
+    assert "src/relqon/safe.py" in result["reasons"][0]
