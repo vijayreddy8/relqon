@@ -285,6 +285,14 @@ def validate_terraform(project_path: Path, changed_files: list[str]) -> dict:
     })
     if fmt_result.returncode != 0:
         errors.append("Terraform formatting check failed. Run 'terraform fmt' on the affected files.")
+        return {
+            "name": "Terraform validation",
+            "status": "FAIL",
+            "duration_seconds": round(time.perf_counter() - started, 3),
+            "error": "\\n".join(errors),
+            "files_checked": valid_files,
+            "steps": steps,
+        }
 
     # Validate each Terraform root independently, without configuring a backend.
     roots = sorted({
