@@ -524,3 +524,68 @@ def test_generate_report_marks_pass_when_all_checks_pass(tmp_path):
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["summary"] == {"passed": 1, "failed": 0, "skipped": 0}
     assert report["overall_status"] == "PASS"
+
+
+def test_cli_run_creates_end_to_end_json_report(tmp_path, monkeypatch):
+    import json
+    import relqon.cli as cli
+
+    source = tmp_path / "src" / "app.py"
+    source.parent.mkdir()
+    source.write_text("VALUE = 42\n", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "detect_changes", lambda project_path: (0, []))
+    monkeypatch.setattr(
+        cli,
+        "run_pytest",
+        lambda project_path: {
+            "name": "Pytest unit tests",
+            "status": "PASS",
+            "duration_seconds": 0.01,
+            "error": None,
+            "output": "1 passed",
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "test_python_failure_detection",
+        lambda: {
+            "name": "Python failure detection test",
+            "status": "PASS",
+            "duration_seconds": 0.01,
+            "error": None,
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "test_failure_detection",
+        lambda project_path: {
+            "name": "Docker failure detection test",
+            "status": "PASS",
+            "duration_seconds": 0.01,
+            "error": None,
+        },
+    )
+    monkeypatch.setattr(
+        cli.sys,
+        "argv",
+        ["relqon", "run", str(tmp_path), "--changed-file", "src/app.py"],
+    )
+
+    exit_code = cli.main()
+
+    report_path = tmp_path / "reports" / "validation-report.json"
+    assert exit_code == 0
+    assert report_path.is_file()
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["changed_files"] == ["src/app.py"]
+    assert "python_check" in report["impact_analysis"]["checks"]
+    python_check = next(
+        check for check in report["checks"]
+        if check["name"] == "Python syntax validation"
+    )
+    assert python_check["status"] == "PASS"
+    assert python_check["files_checked"] == ["src/app.py"]
+    assert report["overall_status"] == "PASS"
+    assert report["summary"]["failed"] == 0
