@@ -25,7 +25,6 @@ def _decode_git_status_path(filename: str) -> str:
             "f": "\\f",
             "r": "\\r",
             '"': '"',
-            "\\": "\\",
         }
         while index < len(raw):
             char = raw[index]
