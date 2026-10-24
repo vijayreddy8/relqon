@@ -891,3 +891,10 @@ def test_decode_git_status_path_handles_utf8_octal_escapes():
     # Git represents the UTF-8 bytes for "café.py" as octal escapes.
     assert _decode_git_status_path(r'"caf\303\251.py"') == "café.py"
     assert _decode_git_status_path('"文件.py"') == "文件.py"
+
+
+
+def test_decode_git_status_path_preserves_escaped_backslash():
+    from relqon.cli import _decode_git_status_path
+
+    assert _decode_git_status_path(r'"folder\\name.py"') == r"folder\name.py"
