@@ -433,3 +433,94 @@ def test_failure_recovery_guidance_is_added_to_failed_report_check():
     assert result["recovery_guidance"]
     assert any("docker build" in item.lower() for item in result["recovery_guidance"])
 
+
+
+def test_generate_report_serializes_summary_and_overall_status(tmp_path):
+    import json
+    from relqon.cli import generate_report
+
+    checks = [
+        {"name": "Python syntax validation", "status": "PASS", "duration_seconds": 0.01},
+        {
+            "name": "Docker build validation",
+            "status": "FAIL",
+            "duration_seconds": 0.02,
+            "error": "Docker build failed.",
+            "recovery_guidance": ["Review the Dockerfile and build context."],
+        },
+        {
+            "name": "Terraform validation",
+            "status": "SKIPPED",
+            "duration_seconds": 0.0,
+            "error": "Terraform CLI is not installed.",
+            "recovery_guidance": ["Install Terraform CLI."],
+        },
+    ]
+    impact = {
+        "checks": ["docker_build", "python_check", "terraform_check"],
+        "reasons": ["A representative end-to-end report test."],
+    }
+
+    report_path = generate_report(
+        tmp_path,
+        ["Dockerfile", "src/app.py", "infra/main.tf"],
+        impact,
+        checks,
+        "2026-10-24T10:00:00+05:30",
+        0.5,
+    )
+
+    assert report_path.is_file()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["project"] == tmp_path.name
+    assert report["changed_files"] == ["Dockerfile", "src/app.py", "infra/main.tf"]
+    assert report["impact_analysis"] == impact
+    assert report["summary"] == {"passed": 1, "failed": 1, "skipped": 1}
+    assert report["overall_status"] == "FAIL"
+
+    docker_check = next(
+        check for check in report["checks"]
+        if check["name"] == "Docker build validation"
+    )
+    assert docker_check["recovery_guidance"] == [
+        "Review the Dockerfile and build context."
+    ]
+
+
+def test_generate_report_marks_skipped_when_no_checks_fail(tmp_path):
+    import json
+    from relqon.cli import generate_report
+
+    report_path = generate_report(
+        tmp_path,
+        [],
+        {"checks": [], "reasons": []},
+        [
+            {"name": "Terraform validation", "status": "SKIPPED", "duration_seconds": 0.0},
+            {"name": "Python syntax validation", "status": "PASS", "duration_seconds": 0.01},
+        ],
+        "2026-10-24T10:00:00+05:30",
+        0.1,
+    )
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["summary"] == {"passed": 1, "failed": 0, "skipped": 1}
+    assert report["overall_status"] == "SKIPPED"
+
+
+def test_generate_report_marks_pass_when_all_checks_pass(tmp_path):
+    import json
+    from relqon.cli import generate_report
+
+    report_path = generate_report(
+        tmp_path,
+        ["src/app.py"],
+        {"checks": ["python_check"], "reasons": ["Python changed."]},
+        [{"name": "Python syntax validation", "status": "PASS", "duration_seconds": 0.01}],
+        "2026-10-24T10:00:00+05:30",
+        0.1,
+    )
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["summary"] == {"passed": 1, "failed": 0, "skipped": 0}
+    assert report["overall_status"] == "PASS"
