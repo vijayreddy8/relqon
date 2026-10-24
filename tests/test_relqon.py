@@ -589,3 +589,133 @@ def test_cli_run_creates_end_to_end_json_report(tmp_path, monkeypatch):
     assert python_check["files_checked"] == ["src/app.py"]
     assert report["overall_status"] == "PASS"
     assert report["summary"]["failed"] == 0
+
+
+
+def test_cli_failure_writes_recovery_guidance_and_returns_one(tmp_path, monkeypatch):
+    import json
+    import relqon.cli as cli
+
+    source = tmp_path / "src" / "broken.py"
+    source.parent.mkdir()
+    source.write_text("def broken(:\n", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "detect_changes", lambda project_path: (0, []))
+    monkeypatch.setattr(
+        cli,
+        "run_pytest",
+        lambda project_path: {
+            "name": "Pytest unit tests",
+            "status": "PASS",
+            "duration_seconds": 0.01,
+            "error": None,
+            "output": "tests passed",
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "validate_python",
+        lambda project_path, changed_files: {
+            "name": "Python syntax validation",
+            "status": "FAIL",
+            "duration_seconds": 0.01,
+            "error": "src/broken.py: SyntaxError: invalid syntax",
+            "files_checked": ["src/broken.py"],
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "test_python_failure_detection",
+        lambda: {"name": "Python failure detection test", "status": "PASS", "duration_seconds": 0.01},
+    )
+    monkeypatch.setattr(
+        cli,
+        "test_failure_detection",
+        lambda project_path: {"name": "Docker failure detection test", "status": "PASS", "duration_seconds": 0.01},
+    )
+    monkeypatch.setattr(
+        cli.sys,
+        "argv",
+        ["relqon", "run", str(tmp_path), "--changed-file", "src/broken.py"],
+    )
+
+    exit_code = cli.main()
+
+    report = json.loads(
+        (tmp_path / "reports" / "validation-report.json").read_text(encoding="utf-8")
+    )
+    python_check = next(
+        check for check in report["checks"]
+        if check["name"] == "Python syntax validation"
+    )
+    assert exit_code == 1
+    assert report["overall_status"] == "FAIL"
+    assert report["summary"]["failed"] == 1
+    assert python_check["recovery_guidance"]
+    assert any("syntax error" in item.lower() or "traceback" in item.lower()
+               for item in python_check["recovery_guidance"])
+
+
+def test_cli_skipped_validation_returns_two_and_reports_skip_guidance(tmp_path, monkeypatch):
+    import json
+    import relqon.cli as cli
+
+    terraform = tmp_path / "infra" / "main.tf"
+    terraform.parent.mkdir()
+    terraform.write_text('terraform {}\n', encoding="utf-8")
+
+    monkeypatch.setattr(cli, "detect_changes", lambda project_path: (0, []))
+    monkeypatch.setattr(
+        cli,
+        "run_pytest",
+        lambda project_path: {
+            "name": "Pytest unit tests",
+            "status": "PASS",
+            "duration_seconds": 0.01,
+            "error": None,
+            "output": "tests passed",
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "validate_terraform",
+        lambda project_path, changed_files: {
+            "name": "Terraform validation",
+            "status": "SKIPPED",
+            "duration_seconds": 0.0,
+            "error": "Terraform CLI is not installed or not in PATH.",
+            "files_checked": [],
+            "steps": [],
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "test_python_failure_detection",
+        lambda: {"name": "Python failure detection test", "status": "PASS", "duration_seconds": 0.01},
+    )
+    monkeypatch.setattr(
+        cli,
+        "test_failure_detection",
+        lambda project_path: {"name": "Docker failure detection test", "status": "PASS", "duration_seconds": 0.01},
+    )
+    monkeypatch.setattr(
+        cli.sys,
+        "argv",
+        ["relqon", "run", str(tmp_path), "--changed-file", "infra/main.tf"],
+    )
+
+    exit_code = cli.main()
+
+    report = json.loads(
+        (tmp_path / "reports" / "validation-report.json").read_text(encoding="utf-8")
+    )
+    terraform_check = next(
+        check for check in report["checks"]
+        if check["name"] == "Terraform validation"
+    )
+    assert exit_code == 2
+    assert report["overall_status"] == "SKIPPED"
+    assert report["summary"]["skipped"] == 1
+    assert terraform_check["recovery_guidance"]
+    assert any("install terraform" in item.lower()
+               for item in terraform_check["recovery_guidance"])
