@@ -205,6 +205,111 @@ def validate_python(
     }
 
 
+def _validate_kubernetes_document(document: dict, filename: str, index: int) -> None:
+    """Validate common Kubernetes fields and Deployment/Service semantics."""
+
+    context = f"{filename}: document {index}"
+    missing = [
+        field for field in ("apiVersion", "kind", "metadata")
+        if field not in document
+    ]
+    if missing:
+        raise ValueError(
+            f"{context} is missing required field(s): " + ", ".join(missing)
+        )
+
+    if not isinstance(document["apiVersion"], str) or not document["apiVersion"].strip():
+        raise ValueError(f"{context} apiVersion must be a non-empty string.")
+    if not isinstance(document["kind"], str) or not document["kind"].strip():
+        raise ValueError(f"{context} kind must be a non-empty string.")
+    if not isinstance(document["metadata"], dict):
+        raise ValueError(f"{context} metadata must be a YAML mapping/object.")
+    if not isinstance(document["metadata"].get("name"), str) or not document["metadata"]["name"].strip():
+        raise ValueError(f"{context} metadata.name is required.")
+
+    kind = document["kind"]
+    spec = document.get("spec")
+
+    if kind in {"Deployment", "StatefulSet", "DaemonSet", "ReplicaSet"}:
+        if not isinstance(spec, dict):
+            raise ValueError(f"{context} {kind} spec must be a YAML mapping/object.")
+
+        selector = spec.get("selector")
+        if not isinstance(selector, dict) or not isinstance(selector.get("matchLabels"), dict) or not selector["matchLabels"]:
+            raise ValueError(f"{context} {kind} spec.selector.matchLabels must be a non-empty mapping.")
+
+        template = spec.get("template")
+        if not isinstance(template, dict):
+            raise ValueError(f"{context} {kind} spec.template must be a YAML mapping/object.")
+        template_metadata = template.get("metadata")
+        labels = template_metadata.get("labels") if isinstance(template_metadata, dict) else None
+        if not isinstance(labels, dict) or not labels:
+            raise ValueError(f"{context} {kind} spec.template.metadata.labels must be a non-empty mapping.")
+        mismatched = [
+            key for key, value in selector["matchLabels"].items()
+            if labels.get(key) != value
+        ]
+        if mismatched:
+            raise ValueError(
+                f"{context} {kind} selector labels do not match pod-template labels: "
+                + ", ".join(str(key) for key in mismatched)
+            )
+
+        pod_spec = template.get("spec")
+        containers = pod_spec.get("containers") if isinstance(pod_spec, dict) else None
+        if not isinstance(containers, list) or not containers:
+            raise ValueError(f"{context} {kind} spec.template.spec.containers must be a non-empty list.")
+        for container_index, container in enumerate(containers, start=1):
+            if not isinstance(container, dict):
+                raise ValueError(f"{context} container {container_index} must be a mapping.")
+            if not isinstance(container.get("name"), str) or not container["name"].strip():
+                raise ValueError(f"{context} container {container_index} requires a name.")
+            if not isinstance(container.get("image"), str) or not container["image"].strip():
+                raise ValueError(f"{context} container {container_index} requires an image.")
+
+        replicas = spec.get("replicas")
+        if replicas is not None and (
+            isinstance(replicas, bool) or not isinstance(replicas, int) or replicas < 0
+        ):
+            raise ValueError(f"{context} {kind} spec.replicas must be a non-negative integer.")
+
+    elif kind == "Service":
+        if not isinstance(spec, dict):
+            raise ValueError(f"{context} Service spec must be a YAML mapping/object.")
+        if spec.get("type", "ClusterIP") != "ExternalName":
+            ports = spec.get("ports")
+            if not isinstance(ports, list) or not ports:
+                raise ValueError(f"{context} Service spec.ports must be a non-empty list.")
+            for port_index, port in enumerate(ports, start=1):
+                if not isinstance(port, dict):
+                    raise ValueError(f"{context} Service port {port_index} must be a mapping.")
+                number = port.get("port")
+                if isinstance(number, bool) or not isinstance(number, int) or not 1 <= number <= 65535:
+                    raise ValueError(f"{context} Service port {port_index}.port must be an integer from 1 to 65535.")
+                target = port.get("targetPort")
+                if target is not None and (
+                    isinstance(target, bool)
+                    or not (isinstance(target, int) and 1 <= target <= 65535)
+                    and not (isinstance(target, str) and target.strip())
+                ):
+                    raise ValueError(f"{context} Service port {port_index}.targetPort must be a valid port number or name.")
+                protocol = port.get("protocol", "TCP")
+                if protocol not in {"TCP", "UDP", "SCTP"}:
+                    raise ValueError(f"{context} Service port {port_index}.protocol must be TCP, UDP, or SCTP.")
+        selector = spec.get("selector")
+        if selector is not None and not isinstance(selector, dict):
+            raise ValueError(f"{context} Service spec.selector must be a mapping when provided.")
+
+    elif kind == "Pod":
+        spec = document.get("spec")
+        containers = spec.get("containers") if isinstance(spec, dict) else None
+        if not isinstance(containers, list) or not containers:
+            raise ValueError(f"{context} Pod spec.containers must be a non-empty list.")
+        for container_index, container in enumerate(containers, start=1):
+            if not isinstance(container, dict) or not isinstance(container.get("image"), str) or not container["image"].strip():
+                raise ValueError(f"{context} Pod container {container_index} requires an image.")
+
+
 def validate_kubernetes(
     project_path: Path,
     changed_files: list[str],
@@ -282,7 +387,16 @@ def validate_kubernetes(
             if not documents or all(document is None for document in documents):
                 raise ValueError("YAML file is empty.")
 
-            if file_path.name.lower() != "chart.yaml":
+            if file_path.name.lower() == "chart.yaml":
+                chart = documents[0]
+                if not isinstance(chart, dict):
+                    raise ValueError("Chart.yaml must contain a YAML mapping/object.")
+                for field in ("apiVersion", "name", "version"):
+                    if not isinstance(chart.get(field), str) or not chart[field].strip():
+                        raise ValueError(f"Chart.yaml requires a non-empty '{field}' field.")
+                if chart["apiVersion"] not in {"v1", "v2"}:
+                    raise ValueError("Chart.yaml apiVersion must be 'v1' or 'v2'.")
+            else:
                 for index, document in enumerate(documents, start=1):
                     if document is None:
                         continue
@@ -290,23 +404,7 @@ def validate_kubernetes(
                         raise ValueError(
                             f"Document {index} must be a YAML mapping/object."
                         )
-                    missing = [
-                        field for field in ("apiVersion", "kind", "metadata")
-                        if field not in document
-                    ]
-                    if missing:
-                        raise ValueError(
-                            f"Document {index} is missing required field(s): "
-                            + ", ".join(missing)
-                        )
-                    if not isinstance(document["metadata"], dict):
-                        raise ValueError(
-                            f"Document {index} metadata must be a YAML mapping/object."
-                        )
-                    if not document["metadata"].get("name"):
-                        raise ValueError(
-                            f"Document {index} metadata.name is required."
-                        )
+                    _validate_kubernetes_document(document, filename, index)
 
             checked_files.append(filename)
             if file_path.name.lower() != "chart.yaml":
@@ -323,33 +421,50 @@ def validate_kubernetes(
     kubectl = shutil.which("kubectl")
     if kubectl and manifest_files and not errors:
         kubectl_errors = []
+        kubectl_checked = []
         for filename in manifest_files:
-            result = subprocess.run(
-                [
-                    kubectl,
-                    "apply",
-                    "--dry-run=client",
-                    "--validate=false",
-                    "-f",
-                    str((project_path / filename).resolve()),
-                ],
-                cwd=project_path,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=60,
-            )
-            if result.returncode != 0:
-                output = (result.stderr or result.stdout or "kubectl dry-run failed").strip()
-                kubectl_errors.append(f"{filename}: {output[-2000:]}")
+            try:
+                result = subprocess.run(
+                    [
+                        kubectl,
+                        "apply",
+                        "--dry-run=client",
+                        "--validate=false",
+                        "-f",
+                        str((project_path / filename).resolve()),
+                    ],
+                    cwd=project_path,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=60,
+                )
+                output = (result.stdout + "\\n" + result.stderr).strip()[-2000:]
+                kubectl_checked.append({
+                    "file": filename,
+                    "status": "PASS" if result.returncode == 0 else "FAIL",
+                    "output": output,
+                })
+                if result.returncode != 0:
+                    kubectl_errors.append(
+                        f"{filename}: {output or 'kubectl dry-run failed'}"
+                    )
+            except subprocess.TimeoutExpired:
+                kubectl_errors.append(f"{filename}: kubectl dry-run timed out after 60 seconds.")
+                kubectl_checked.append({"file": filename, "status": "FAIL", "output": "Timed out after 60 seconds."})
+            except OSError as exc:
+                kubectl_errors.append(f"{filename}: {exc}")
+                kubectl_checked.append({"file": filename, "status": "FAIL", "output": str(exc)})
 
         kubectl_result = {
             "status": "PASS" if not kubectl_errors else "FAIL",
             "details": (
                 "kubectl client dry-run passed for all selected manifests."
                 if not kubectl_errors
-                else "\n".join(kubectl_errors)[:4000]
+                else "\\n".join(kubectl_errors)[:4000]
             ),
+            "command": "kubectl apply --dry-run=client --validate=false -f <manifest>",
+            "files_checked": kubectl_checked,
         }
         if kubectl_errors:
             errors.extend(kubectl_errors)
