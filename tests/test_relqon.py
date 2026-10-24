@@ -232,3 +232,75 @@ def test_kubernetes_validation_reports_kubectl_evidence_when_available(tmp_path,
     assert result["kubectl_validation"]["status"] == "PASS"
     assert result["kubectl_validation"]["files_checked"][0]["file"] == "k8s/service.yaml"
 
+def test_terraform_validation_runs_fmt_init_and_validate(tmp_path, monkeypatch):
+    import relqon.cli as cli
+
+    terraform_file = tmp_path / "infra" / "main.tf"
+    terraform_file.parent.mkdir()
+    terraform_file.write_text(
+        'terraform { required_version = ">= 1.0.0" }\\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/terraform" if name == "terraform" else None)
+
+    calls = []
+
+    class FakeResult:
+        returncode = 0
+        stdout = "Success"
+        stderr = ""
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return FakeResult()
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    result = cli.validate_terraform(tmp_path, ["infra/main.tf"])
+
+    assert result["status"] == "PASS"
+    assert result["files_checked"] == ["infra/main.tf"]
+    assert [command[1] for command in calls] == ["fmt", "init", "validate"]
+    assert result["steps"][-1]["name"] == "terraform validate"
+
+
+def test_terraform_validation_fails_when_format_check_fails(tmp_path, monkeypatch):
+    import relqon.cli as cli
+
+    terraform_file = tmp_path / "infra" / "main.tf"
+    terraform_file.parent.mkdir()
+    terraform_file.write_text('terraform {}\\n', encoding="utf-8")
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/terraform" if name == "terraform" else None)
+
+    class FakeResult:
+        def __init__(self, returncode, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return FakeResult(1, stdout="main.tf")
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    result = cli.validate_terraform(tmp_path, ["infra/main.tf"])
+
+    assert result["status"] == "FAIL"
+    assert "formatting check failed" in result["error"]
+    assert len(calls) == 1
+
+
+def test_terraform_validation_skips_when_cli_missing(tmp_path, monkeypatch):
+    import relqon.cli as cli
+
+    terraform_file = tmp_path / "infra" / "main.tf"
+    terraform_file.parent.mkdir()
+    terraform_file.write_text("terraform {}\\n", encoding="utf-8")
+    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
+
+    result = cli.validate_terraform(tmp_path, ["infra/main.tf"])
+
+    assert result["status"] == "SKIPPED"
+    assert "not installed" in result["error"]
+
