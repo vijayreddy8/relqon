@@ -52,8 +52,10 @@ def test_multiple_changes_trigger_multiple_checks():
 
 
 
-def test_kubernetes_yaml_validates_manifest_structure(tmp_path):
-    from relqon.cli import validate_kubernetes
+def test_kubernetes_yaml_validates_manifest_structure(tmp_path, monkeypatch):
+    import relqon.cli as cli
+    validate_kubernetes = cli.validate_kubernetes
+    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
 
     manifest = tmp_path / "k8s" / "deployment.yaml"
     manifest.parent.mkdir()
