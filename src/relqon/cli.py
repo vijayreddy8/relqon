@@ -38,11 +38,19 @@ def _decode_git_status_path(filename: str) -> str:
                 decoded.append(escapes[next_char])
                 index += 2
             elif next_char in "01234567":
-                end = index + 2
-                while end < min(index + 4, len(raw)) and raw[end] in "01234567":
-                    end += 1
-                decoded.append(chr(int(raw[index + 1:end], 8)))
-                index = end
+                # Git emits UTF-8 bytes as octal escapes for non-ASCII paths.
+                octets = bytearray()
+                while (
+                    index + 1 < len(raw)
+                    and raw[index] == "\\\\"
+                    and raw[index + 1] in "01234567"
+                ):
+                    end = index + 2
+                    while end < min(index + 4, len(raw)) and raw[end] in "01234567":
+                        end += 1
+                    octets.append(int(raw[index + 1:end], 8))
+                    index = end
+                decoded.append(octets.decode("utf-8", errors="replace"))
             else:
                 decoded.append(next_char)
                 index += 2
