@@ -6,3 +6,5 @@ dist/
 build/
 .env
 reports/
+*.egg-info/
+src/relqon.egg-info/
