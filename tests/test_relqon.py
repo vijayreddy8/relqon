@@ -340,3 +340,39 @@ def test_recovery_guidance_does_not_change_successful_checks():
 
     assert "recovery_guidance" not in result
 
+def test_recovery_guidance_for_kubernetes_manifest_failure():
+    from relqon.cli import add_recovery_guidance
+
+    result = add_recovery_guidance({
+        "name": "Kubernetes validation",
+        "status": "FAIL",
+        "error": "Manifest selector does not match pod template labels.",
+    })
+
+    assert len(result["recovery_guidance"]) >= 1
+    assert any("manifest" in item.lower() or "kubectl" in item.lower() for item in result["recovery_guidance"])
+
+
+def test_recovery_guidance_for_docker_build_failure():
+    from relqon.cli import add_recovery_guidance
+
+    result = add_recovery_guidance({
+        "name": "Docker build",
+        "status": "FAIL",
+        "error": "Docker build failed.",
+    })
+
+    assert any("docker build" in item.lower() for item in result["recovery_guidance"])
+
+
+def test_recovery_guidance_for_python_test_failure():
+    from relqon.cli import add_recovery_guidance
+
+    result = add_recovery_guidance({
+        "name": "Pytest unit tests",
+        "status": "FAIL",
+        "error": "AssertionError in test example.",
+    })
+
+    assert any("traceback" in item.lower() or "python" in item.lower() for item in result["recovery_guidance"])
+
