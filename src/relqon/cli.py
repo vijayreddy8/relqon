@@ -969,6 +969,12 @@ def main() -> int:
         default=".",
         help="Path to the project directory (default: current directory).",
     )
+    run_parser.add_argument(
+        "--changed-file",
+        action="append",
+        default=[],
+        help="Explicitly include a project-relative changed file for validation. May be repeated.",
+    )
 
     args = parser.parse_args()
     project_path = Path(args.project_path).resolve()
@@ -981,6 +987,11 @@ def main() -> int:
     started = time.perf_counter()
 
     _, changed_files = detect_changes(project_path)
+    if args.changed_file:
+        changed_files = sorted(set(changed_files) | set(args.changed_file))
+        print("\\nExplicit validation file(s) included:")
+        for filename in args.changed_file:
+            print(f"  File: {filename}")
     impact = analyse_impact(changed_files)
 
     print("\nRelqon - Change Impact Analysis")
