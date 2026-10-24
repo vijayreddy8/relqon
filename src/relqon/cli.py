@@ -1122,6 +1122,8 @@ def add_recovery_guidance(check: dict) -> dict:
             suggestions.append("If kubectl is available, reproduce with 'kubectl apply --dry-run=client -f <manifest>'.")
         elif "docker" in name:
             suggestions.append("Review the Dockerfile and build context, then reproduce with 'docker build .' from the project root.")
+        elif "node.js" in name or "npm" in details or "typescript" in details:
+            suggestions.append("Run 'npm ci' and 'npm run build' in the affected package directory, then fix the first TypeScript/compiler diagnostic.")
         elif "python" in name or "pytest" in name:
             suggestions.append("Run the failing Python check locally and use the first traceback or syntax error to locate the issue.")
         else:
