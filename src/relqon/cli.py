@@ -858,6 +858,46 @@ def test_failure_detection(project_path: Path) -> dict:
         }
 
 
+def add_recovery_guidance(check: dict) -> dict:
+    """Attach actionable recovery suggestions to failed or skipped checks."""
+
+    status = check.get("status")
+    name = str(check.get("name", "")).lower()
+    details = str(check.get("error") or check.get("details") or "").lower()
+    suggestions = []
+
+    if status == "FAIL":
+        if "terraform" in name or "terraform" in details:
+            if "format" in details or "fmt" in details:
+                suggestions.append("Run 'terraform fmt' in the affected Terraform root, then rerun Relqon.")
+            if "init" in details or "initializ" in details or "provider" in details:
+                suggestions.append("Check required_providers and provider constraints, then rerun 'terraform init -backend=false'.")
+            if "validate" in details or "configuration" in details:
+                suggestions.append("Review the Terraform diagnostic output and correct the reported configuration errors.")
+            if not suggestions:
+                suggestions.append("Run 'terraform fmt -check -diff', 'terraform init -backend=false', and 'terraform validate' in the affected root to reproduce the failure.")
+        elif "kubernetes" in name or "kubectl" in details or "manifest" in details:
+            suggestions.append("Inspect the failing manifest's apiVersion, kind, metadata, selectors, labels, containers, and ports.")
+            suggestions.append("If kubectl is available, reproduce with 'kubectl apply --dry-run=client -f <manifest>'.")
+        elif "docker" in name:
+            suggestions.append("Review the Dockerfile and build context, then reproduce with 'docker build .' from the project root.")
+        elif "python" in name or "pytest" in name:
+            suggestions.append("Run the failing Python check locally and use the first traceback or syntax error to locate the issue.")
+        else:
+            suggestions.append("Review the check's error/details output, reproduce the failing command locally, and rerun Relqon after fixing the root cause.")
+    elif status == "SKIPPED":
+        if "terraform" in name and "not installed" in details:
+            suggestions.append("Install Terraform CLI and ensure it is available on PATH, then rerun Relqon.")
+        elif "terraform" in name:
+            suggestions.append("Confirm that the changed-file list includes a .tf or .tfvars file.")
+        else:
+            suggestions.append("Check the skip reason and ensure the required tool and relevant changed files are available.")
+
+    if suggestions:
+        check["recovery_guidance"] = suggestions
+    return check
+
+
 def generate_report(
     project_path: Path,
     changed_files: list[str],
@@ -1024,6 +1064,9 @@ def main() -> int:
     # Self-tests run independently of the changed files.
     checks.append(test_python_failure_detection())
     checks.append(test_failure_detection(project_path))
+
+    # Include actionable recovery advice in the JSON report for failed/skipped checks.
+    checks = [add_recovery_guidance(check) for check in checks]
 
     print("\nRelqon - Validation Summary")
 
