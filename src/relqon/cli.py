@@ -284,16 +284,48 @@ def validate_terraform(project_path: Path, changed_files: list[str]) -> dict:
             "steps": [{"name": "file selection", "status": "PASS", "details": "Only deleted Terraform files changed; no remaining files require validation."}],
         }
 
-    fmt_result = subprocess.run(
-        [terraform, "fmt", "-check", "-diff", *[
-            str((project_path / filename).resolve()) for filename in valid_files
-        ]],
-        cwd=project_path,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=120,
-    )
+    try:
+        fmt_result = subprocess.run(
+            [terraform, "fmt", "-check", "-diff", *[
+                str((project_path / filename).resolve()) for filename in valid_files
+            ]],
+            cwd=project_path,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        message = "Terraform formatting check timed out after 120 seconds."
+        steps.append({
+            "name": "terraform fmt -check -diff",
+            "status": "FAIL",
+            "details": message,
+        })
+        return {
+            "name": "Terraform validation",
+            "status": "FAIL",
+            "duration_seconds": round(time.perf_counter() - started, 3),
+            "error": message,
+            "files_checked": valid_files,
+            "steps": steps,
+        }
+    except OSError as exc:
+        message = f"Could not run Terraform formatting check: {exc}"
+        steps.append({
+            "name": "terraform fmt -check -diff",
+            "status": "FAIL",
+            "details": message,
+        })
+        return {
+            "name": "Terraform validation",
+            "status": "FAIL",
+            "duration_seconds": round(time.perf_counter() - started, 3),
+            "error": message,
+            "files_checked": valid_files,
+            "steps": steps,
+        }
+
     fmt_output = (fmt_result.stdout + "\\n" + fmt_result.stderr).strip()[-4000:]
     steps.append({
         "name": "terraform fmt -check -diff",
