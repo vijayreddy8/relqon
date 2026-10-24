@@ -69,37 +69,37 @@ flowchart TD
 
 ## Quick start
 
-Relqon supports Python 3.10+ on Windows, Ubuntu/Linux, and macOS. The setup scripts create a local virtual environment, upgrade \`pip\`, and install Relqon with its test dependencies so the \`relqon\` command is registered in that environment.
+Relqon supports Python 3.10+ on Windows, Ubuntu/Linux, and macOS. The setup scripts create a local virtual environment, upgrade `pip`, and install Relqon with its test dependencies so the `relqon` command is registered in that environment.
 
 **Windows (PowerShell)**
 
-\`\`\`powershell
+```powershell
 git clone https://github.com/vijayreddy8/relqon.git
 cd relqon
 .\scripts\setup.ps1
 .\.venv\Scripts\relqon.exe run .
-\`\`\`
+```
 
 If PowerShell blocks the setup script, run it with a one-time policy override:
 
-\`\`\`powershell
+```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
-\`\`\`
+```
 
 **Ubuntu / other Linux**
 
-\`\`\`bash
+```bash
 git clone https://github.com/vijayreddy8/relqon.git
 cd relqon
 sh scripts/setup.sh
 ./.venv/bin/relqon run .
-\`\`\`
+```
 
 **macOS**
 
 Use the same commands as Ubuntu/Linux. Make sure Python 3.10+ is installed.
 
-Using the explicit executable path (\`.venv/bin/relqon\` on Linux/macOS or \`.venv\Scripts\relqon.exe\` on Windows) avoids the common “command not found” issue caused by an inactive virtual environment. If installation fails, keep the full pip error output when troubleshooting.
+Using the explicit executable path (`.venv/bin/relqon` on Linux/macOS or `.venv\Scripts\relqon.exe` on Windows) avoids the common “command not found” issue caused by an inactive virtual environment. If installation fails, keep the full pip error output when troubleshooting.
 
 ## Requirements
 
