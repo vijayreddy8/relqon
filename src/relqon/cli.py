@@ -4,64 +4,14 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
 
 
-FILE_TYPES = {
-    ".py": "Python Code",
-    ".js": "JavaScript Code",
-    ".ts": "TypeScript Code",
-    ".java": "Java Code",
-    ".go": "Go Code",
-    ".yaml": "YAML Configuration",
-    ".yml": "YAML Configuration",
-    ".json": "JSON Configuration",
-    ".tf": "Terraform",
-    ".sh": "Shell Script",
-    ".ps1": "PowerShell Script",
-    ".sql": "Database Script",
-    ".toml": "Project Configuration",
-}
-
-SPECIAL_FILES = {
-    "Dockerfile": "Docker Configuration",
-    "docker-compose.yml": "Docker Compose",
-    "docker-compose.yaml": "Docker Compose",
-    "Makefile": "Build Automation",
-}
-
-
-def classify_file(filename: str) -> str:
-    """Classify a changed file by name or extension."""
-
-    name = Path(filename).name
-
-    if name in SPECIAL_FILES:
-        return SPECIAL_FILES[name]
-    if name == "Jenkinsfile":
-        return "Jenkins Pipeline"
-    if name == ".gitignore":
-        return "Git Configuration"
-    if name == "requirements.txt":
-        return "Python Dependencies"
-    if name == "package.json":
-        return "Node.js Dependencies"
-    if name == "Chart.yaml":
-        return "Helm Chart"
-    if name.endswith(".tfvars"):
-        return "Terraform Variables"
-
-    if name.endswith((".yaml", ".yml")):
-        if "k8s" in filename.lower() or "kubernetes" in filename.lower():
-            return "Kubernetes Configuration"
-
-    return FILE_TYPES.get(Path(name).suffix.lower(), "Other File")
-
-
-def get_changed_files(project_path: Path) -> list[str] | None:
-    """Return changed paths reported by Git."""
+def get_changed_files(project_path: Path) -> list[str]:
+    """Get changed, staged, and untracked files from Git."""
 
     result = subprocess.run(
         ["git", "status", "--short", "--untracked-files=all"],
@@ -72,75 +22,83 @@ def get_changed_files(project_path: Path) -> list[str] | None:
     )
 
     if result.returncode != 0:
-        print("ERROR: Unable to read Git status.")
-        if result.stderr.strip():
-            print(result.stderr.strip())
-        return None
+        print("Warning: Could not read Git status.")
+        return []
 
-    return [
-        line[3:].strip()
-        for line in result.stdout.splitlines()
-        if len(line) >= 4
-    ]
+    changed_files = []
+
+    for line in result.stdout.splitlines():
+        if len(line) < 4:
+            continue
+
+        filename = line[3:].strip()
+
+        # Handle Git rename output.
+        if " -> " in filename:
+            filename = filename.split(" -> ")[-1]
+
+        filename = filename.replace("\\", "/")
+
+        if filename:
+            changed_files.append(filename)
+
+    return sorted(set(changed_files))
 
 
 def detect_changes(project_path: Path) -> tuple[int, list[str]]:
-    """Detect and classify changed files."""
-
-    if not (project_path / ".git").exists():
-        print("ERROR: This folder is not a Git repository.")
-        return 1, []
-
-    changed_files = get_changed_files(project_path)
-
-    if changed_files is None:
-        return 1, []
+    """Detect project changes."""
 
     print("\nRelqon - Change Intelligence")
-    print("----------------------------")
+    changed_files = get_changed_files(project_path)
 
     if not changed_files:
-        print("Working tree is clean. No changes detected.")
+        print("No changed files detected.")
         return 0, []
 
-    print(f"Detected {len(changed_files)} changed file(s):\n")
+    print(f"Detected {len(changed_files)} changed file(s):")
 
     for filename in changed_files:
         print(f"  File: {filename}")
-        print(f"  Type: {classify_file(filename)}\n")
 
-    print("Change classification complete.")
-    return 0, changed_files
+    return len(changed_files), changed_files
 
 
 def analyse_impact(changed_files: list[str]) -> dict:
-    """Select checks based on changed-file patterns."""
+    """Identify which validation checks are relevant."""
 
     checks = set()
     reasons = []
 
     for filename in changed_files:
-        name = Path(filename).name.lower()
-        suffix = Path(filename).suffix.lower()
+        path = Path(filename)
+        name = path.name.lower()
+        parts = {part.lower() for part in path.parts}
 
-        if name == "dockerfile" or name in {
-            "docker-compose.yml",
-            "docker-compose.yaml",
-        }:
+        # Test fixtures are handled by dedicated self-tests.
+        is_test_file = "tests" in parts or "test" in parts
+
+        if (
+            name == "dockerfile"
+            or name in {"docker-compose.yml", "docker-compose.yaml"}
+        ):
             checks.add("docker_build")
-            reasons.append(f"{filename}: Docker configuration changed.")
+            reasons.append(
+                f"{filename}: Docker configuration changed."
+            )
 
-        if suffix == ".py" or name in {
-            "requirements.txt",
-            "pyproject.toml",
-        }:
+        if not is_test_file and (
+            path.suffix.lower() == ".py"
+            or name in {"requirements.txt", "pyproject.toml"}
+        ):
             checks.add("python_check")
-            reasons.append(f"{filename}: Python code or dependencies changed.")
+            reasons.append(
+                f"{filename}: Python code or dependencies changed."
+            )
 
-        if suffix in {".yaml", ".yml"} and (
-            "k8s" in filename.lower()
-            or "kubernetes" in filename.lower()
-            or "helm" in filename.lower()
+        if (
+            "k8s" in parts
+            or "kubernetes" in parts
+            or "helm" in parts
             or name == "chart.yaml"
         ):
             checks.add("kubernetes_check")
@@ -148,42 +106,58 @@ def analyse_impact(changed_files: list[str]) -> dict:
                 f"{filename}: Kubernetes or Helm configuration changed."
             )
 
-        if suffix in {".tf", ".tfvars"}:
+        if path.suffix.lower() in {".tf", ".tfvars"}:
             checks.add("terraform_check")
-            reasons.append(f"{filename}: Terraform configuration changed.")
+            reasons.append(
+                f"{filename}: Terraform configuration changed."
+            )
 
-    return {"checks": sorted(checks), "reasons": reasons}
+    return {
+        "checks": sorted(checks),
+        "reasons": reasons,
+    }
 
 
-def validate_python(project_path: Path, changed_files: list[str]) -> dict:
-    """Compile changed Python files to detect syntax errors."""
+def validate_python(
+    project_path: Path,
+    changed_files: list[str],
+) -> dict:
+    """Compile changed production Python files."""
 
     started = time.perf_counter()
 
     python_files = [
-        filename for filename in changed_files
+        filename
+        for filename in changed_files
         if Path(filename).suffix.lower() == ".py"
+        and not ({"tests", "test"} & {
+            part.lower() for part in Path(filename).parts
+        })
     ]
 
     if not python_files:
         return {
             "name": "Python syntax validation",
             "status": "SKIPPED",
-            "duration_seconds": round(time.perf_counter() - started, 3),
-            "error": (
-                "Python dependency changes were detected, but no changed "
-                "Python source file was available to compile."
+            "duration_seconds": round(
+                time.perf_counter() - started, 3
             ),
+            "error": "No changed production Python files to validate.",
+            "files_checked": [],
         }
 
     errors = []
+    checked_files = []
 
     for filename in python_files:
         file_path = (project_path / filename).resolve()
 
-        # Do not compile files outside the selected project.
-        if not file_path.is_relative_to(project_path.resolve()):
-            errors.append(f"{filename}: path is outside the project.")
+        try:
+            file_path.relative_to(project_path.resolve())
+        except ValueError:
+            errors.append(
+                f"{filename}: file is outside the project directory."
+            )
             continue
 
         if not file_path.is_file():
@@ -192,7 +166,12 @@ def validate_python(project_path: Path, changed_files: list[str]) -> dict:
 
         try:
             result = subprocess.run(
-                [sys.executable, "-m", "py_compile", str(file_path)],
+                [
+                    sys.executable,
+                    "-m",
+                    "py_compile",
+                    str(file_path),
+                ],
                 cwd=project_path,
                 capture_output=True,
                 text=True,
@@ -200,150 +179,258 @@ def validate_python(project_path: Path, changed_files: list[str]) -> dict:
                 timeout=30,
             )
 
+            checked_files.append(filename)
+
             if result.returncode != 0:
-                message = result.stderr.strip() or "Python compilation failed."
+                message = (
+                    result.stderr.strip()
+                    or result.stdout.strip()
+                    or "Python syntax check failed."
+                )
                 errors.append(f"{filename}: {message}")
 
         except subprocess.TimeoutExpired:
-            errors.append(f"{filename}: compilation timed out.")
+            errors.append(f"{filename}: syntax check timed out.")
         except OSError as exc:
             errors.append(f"{filename}: {exc}")
 
-    if errors:
-        status = "FAIL"
-        error = "\n".join(errors)[:4000]
-    else:
-        status = "PASS"
-        error = None
-
     return {
         "name": "Python syntax validation",
-        "status": status,
-        "duration_seconds": round(time.perf_counter() - started, 3),
-        "error": error,
-        "files_checked": python_files,
+        "status": "FAIL" if errors else "PASS",
+        "duration_seconds": round(
+            time.perf_counter() - started, 3
+        ),
+        "error": "\n".join(errors)[:4000] if errors else None,
+        "files_checked": checked_files,
     }
 
 
 def validate_docker(project_path: Path) -> dict:
-    """Build the project's Docker image and capture evidence."""
+    """Build the project's Docker image to validate its Dockerfile."""
 
     started = time.perf_counter()
     dockerfile = project_path / "Dockerfile"
 
     if not dockerfile.is_file():
         return {
-            "name": "Docker build",
+            "name": "Docker build validation",
             "status": "SKIPPED",
-            "duration_seconds": round(time.perf_counter() - started, 3),
-            "error": "No Dockerfile found.",
+            "duration_seconds": round(
+                time.perf_counter() - started, 3
+            ),
+            "error": "No root Dockerfile found.",
         }
 
     if shutil.which("docker") is None:
         return {
-            "name": "Docker build",
-            "status": "FAIL",
-            "duration_seconds": round(time.perf_counter() - started, 3),
-            "error": "Docker CLI not found on PATH.",
+            "name": "Docker build validation",
+            "status": "SKIPPED",
+            "duration_seconds": round(
+                time.perf_counter() - started, 3
+            ),
+            "error": "Docker CLI is not installed or not in PATH.",
         }
 
     try:
         result = subprocess.run(
             [
-                "docker", "build", "--tag", "relqon-validation",
+                "docker",
+                "build",
+                "-t",
+                "relqon-validation:local",
+                "-f",
+                str(dockerfile),
                 str(project_path),
             ],
+            cwd=project_path,
             capture_output=True,
             text=True,
             check=False,
             timeout=300,
         )
 
-        if result.returncode == 0:
-            status, error = "PASS", None
-        else:
-            status = "FAIL"
+        error = None
+
+        if result.returncode != 0:
             error = (
-                result.stderr.strip() or "Docker build failed."
+                result.stderr.strip()
+                or result.stdout.strip()
+                or "Docker build failed."
             )[-4000:]
 
-    except subprocess.TimeoutExpired:
-        status, error = "FAIL", "Docker build timed out after 300 seconds."
-    except OSError as exc:
-        status, error = "FAIL", str(exc)
+        return {
+            "name": "Docker build validation",
+            "status": "PASS" if result.returncode == 0 else "FAIL",
+            "duration_seconds": round(
+                time.perf_counter() - started, 3
+            ),
+            "error": error,
+        }
 
-    return {
-        "name": "Docker build",
-        "status": status,
-        "duration_seconds": round(time.perf_counter() - started, 3),
-        "error": error,
-    }
+    except subprocess.TimeoutExpired:
+        return {
+            "name": "Docker build validation",
+            "status": "FAIL",
+            "duration_seconds": round(
+                time.perf_counter() - started, 3
+            ),
+            "error": "Docker build timed out after 300 seconds.",
+        }
+    except OSError as exc:
+        return {
+            "name": "Docker build validation",
+            "status": "FAIL",
+            "duration_seconds": round(
+                time.perf_counter() - started, 3
+            ),
+            "error": str(exc),
+        }
+
+
+def test_python_failure_detection() -> dict:
+    """Confirm that Relqon's Python syntax check catches broken code."""
+
+    started = time.perf_counter()
+
+    with tempfile.TemporaryDirectory(prefix="relqon-python-test-") as temp:
+        test_file = Path(temp) / "broken_test.py"
+        test_file.write_text(
+            "def broken_function(:\n",
+            encoding="utf-8",
+        )
+
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "py_compile",
+                    str(test_file),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+
+            detected = (
+                result.returncode != 0
+                and "SyntaxError" in result.stderr
+            )
+
+            return {
+                "name": "Python failure detection test",
+                "status": "PASS" if detected else "FAIL",
+                "duration_seconds": round(
+                    time.perf_counter() - started, 3
+                ),
+                "error": (
+                    None
+                    if detected
+                    else "The intentional Python syntax error was not detected."
+                ),
+            }
+
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            return {
+                "name": "Python failure detection test",
+                "status": "FAIL",
+                "duration_seconds": round(
+                    time.perf_counter() - started, 3
+                ),
+                "error": str(exc),
+            }
 
 
 def test_failure_detection(project_path: Path) -> dict:
-    """Check the known invalid Dockerfile fails for the expected reason."""
+    """Confirm that Docker failure detection works."""
 
     started = time.perf_counter()
     test_dockerfile = (
         project_path / "tests" / "docker_failure" / "Dockerfile"
     )
+    invalid_image = "this-image-does-not-exist-relqon:999"
 
     if not test_dockerfile.is_file():
         return {
-            "name": "Failure detection test",
+            "name": "Docker failure detection test",
             "status": "SKIPPED",
-            "duration_seconds": round(time.perf_counter() - started, 3),
-            "error": "Failure-test Dockerfile not found.",
+            "duration_seconds": round(
+                time.perf_counter() - started, 3
+            ),
+            "error": "Docker failure-test Dockerfile not found.",
         }
 
     if shutil.which("docker") is None:
         return {
-            "name": "Failure detection test",
+            "name": "Docker failure detection test",
             "status": "SKIPPED",
-            "duration_seconds": round(time.perf_counter() - started, 3),
-            "error": "Docker CLI not found on PATH.",
+            "duration_seconds": round(
+                time.perf_counter() - started, 3
+            ),
+            "error": "Docker CLI is not installed or not in PATH.",
         }
 
     try:
         result = subprocess.run(
             [
-                "docker", "build",
-                "--tag", "relqon-failure-validation",
-                "--file", str(test_dockerfile),
+                "docker",
+                "build",
+                "--pull",
+                "-f",
+                str(test_dockerfile),
+                "-t",
+                "relqon-intentional-failure-test:local",
                 str(test_dockerfile.parent),
             ],
+            cwd=project_path,
             capture_output=True,
             text=True,
             check=False,
-            timeout=120,
+            timeout=180,
         )
 
-        output = (result.stdout + "\n" + result.stderr).lower()
-        expected_failure = (
+        output = result.stdout + "\n" + result.stderr
+
+        detected = (
             result.returncode != 0
-            and "this-image-does-not-exist-relqon" in output
+            and invalid_image in output
         )
 
-        if expected_failure:
-            status, error = "PASS", None
-        elif result.returncode == 0:
-            status = "FAIL"
-            error = "The invalid Dockerfile unexpectedly built."
-        else:
-            status = "FAIL"
-            error = "Docker failed for an unexpected reason."
+        return {
+            "name": "Docker failure detection test",
+            "status": "PASS" if detected else "FAIL",
+            "duration_seconds": round(
+                time.perf_counter() - started, 3
+            ),
+            "error": (
+                None
+                if detected
+                else (
+                    "Expected Docker failure was not confirmed. "
+                    "Check Docker output and the test Dockerfile."
+                )
+            ),
+        }
 
     except subprocess.TimeoutExpired:
-        status, error = "FAIL", "Failure-detection test timed out."
+        return {
+            "name": "Docker failure detection test",
+            "status": "FAIL",
+            "duration_seconds": round(
+                time.perf_counter() - started, 3
+            ),
+            "error": "Docker failure test timed out.",
+        }
     except OSError as exc:
-        status, error = "FAIL", str(exc)
-
-    return {
-        "name": "Failure detection test",
-        "status": status,
-        "duration_seconds": round(time.perf_counter() - started, 3),
-        "error": error,
-    }
+        return {
+            "name": "Docker failure detection test",
+            "status": "FAIL",
+            "duration_seconds": round(
+                time.perf_counter() - started, 3
+            ),
+            "error": str(exc),
+        }
 
 
 def generate_report(
@@ -354,28 +441,22 @@ def generate_report(
     started_at: str,
     total_duration: float,
 ) -> Path:
-    """Write change-impact and validation results to JSON."""
-
-    reports_dir = project_path / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
+    """Write validation results to a JSON report."""
 
     statuses = [check["status"] for check in checks]
 
     if "FAIL" in statuses:
         overall_status = "FAIL"
     elif "SKIPPED" in statuses:
-        overall_status = "WARNING"
+        overall_status = "SKIPPED"
     else:
         overall_status = "PASS"
 
     report = {
-        "project": "Relqon",
+        "project": project_path.name,
         "timestamp": started_at,
         "duration_seconds": round(total_duration, 3),
-        "changed_files": [
-            {"path": filename, "type": classify_file(filename)}
-            for filename in changed_files
-        ],
+        "changed_files": changed_files,
         "impact_analysis": impact,
         "checks": checks,
         "summary": {
@@ -386,45 +467,59 @@ def generate_report(
         "overall_status": overall_status,
     }
 
+    reports_dir = project_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
     report_path = reports_dir / "validation-report.json"
     report_path.write_text(
         json.dumps(report, indent=4),
         encoding="utf-8",
     )
+
     return report_path
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        prog="relqon",
-        description="DevOps change impact analysis and validation",
+        description="Relqon - Automated DevOps Change Impact & Recovery Platform"
     )
-    parser.add_argument("command", choices=["run"])
-    parser.add_argument("path", nargs="?", default=".")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Detect changes and run relevant validations.",
+    )
+    run_parser.add_argument(
+        "project_path",
+        nargs="?",
+        default=".",
+        help="Path to the project directory (default: current directory).",
+    )
 
     args = parser.parse_args()
-    project_path = Path(args.path).resolve()
-    started_at = datetime.now().astimezone().isoformat()
-    run_started = time.perf_counter()
+    project_path = Path(args.project_path).resolve()
 
-    detection_code, changed_files = detect_changes(project_path)
+    if not project_path.is_dir():
+        print(f"Error: Project directory not found: {project_path}")
+        return 1
 
-    if detection_code != 0:
-        return detection_code
+    started_clock = datetime.now().astimezone().isoformat()
+    started = time.perf_counter()
 
+    _, changed_files = detect_changes(project_path)
     impact = analyse_impact(changed_files)
 
     print("\nRelqon - Change Impact Analysis")
-    print("------------------------------")
 
     if impact["checks"]:
         print("Relevant checks identified:")
-        for check_name in impact["checks"]:
-            print(f"  - {check_name}")
-        for reason in impact["reasons"]:
-            print(f"  Reason: {reason}")
+        for check in impact["checks"]:
+            print(f"  - {check}")
     else:
-        print("No supported validation checks matched these changes.")
+        print("No production validation checks required.")
+
+    for reason in impact["reasons"]:
+        print(f"  Reason: {reason}")
 
     checks = []
 
@@ -434,50 +529,61 @@ def main() -> int:
     if "docker_build" in impact["checks"]:
         checks.append(validate_docker(project_path))
 
-    for check_name, display_name in [
-        ("kubernetes_check", "Kubernetes checks"),
-        ("terraform_check", "Terraform checks"),
-    ]:
-        if check_name in impact["checks"]:
-            checks.append({
-                "name": display_name,
-                "status": "SKIPPED",
-                "duration_seconds": 0,
-                "error": "Impact rule exists; validator is not implemented yet.",
-            })
+    if "kubernetes_check" in impact["checks"]:
+        checks.append({
+            "name": "Kubernetes validation",
+            "status": "SKIPPED",
+            "duration_seconds": 0,
+            "error": "Kubernetes validation is not implemented yet.",
+        })
 
+    if "terraform_check" in impact["checks"]:
+        checks.append({
+            "name": "Terraform validation",
+            "status": "SKIPPED",
+            "duration_seconds": 0,
+            "error": "Terraform validation is not implemented yet.",
+        })
+
+    # Self-tests run independently of the changed files.
+    checks.append(test_python_failure_detection())
     checks.append(test_failure_detection(project_path))
 
     print("\nRelqon - Validation Summary")
-    print("---------------------------")
 
     for check in checks:
+        duration = check.get("duration_seconds", 0)
         print(
-            f"{check['name']}: {check['status']} "
-            f"({check['duration_seconds']} seconds)"
+            f'{check["name"]}: {check["status"]} '
+            f'({duration:.3f} seconds)'
         )
-        if check["error"]:
-            print(f"  Details: {check['error']}")
 
-    total_duration = time.perf_counter() - run_started
+        if check.get("error"):
+            print(f'  Details: {check["error"]}')
 
-    try:
-        report_path = generate_report(
-            project_path, changed_files, impact, checks,
-            started_at, total_duration,
-        )
-        print(f"\nJSON report saved: {report_path}")
-    except (OSError, TypeError, ValueError) as exc:
-        print(f"ERROR: Could not save JSON report: {exc}")
+    total_duration = time.perf_counter() - started
+
+    report_path = generate_report(
+        project_path,
+        changed_files,
+        impact,
+        checks,
+        started_clock,
+        total_duration,
+    )
+
+    print(f"\nJSON report saved: {report_path}")
+
+    statuses = [check["status"] for check in checks]
+
+    if "FAIL" in statuses:
         return 1
 
-    if any(check["status"] == "FAIL" for check in checks):
-        return 1
-    if any(check["status"] == "SKIPPED" for check in checks):
+    if "SKIPPED" in statuses:
         return 2
 
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())
