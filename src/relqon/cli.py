@@ -1136,7 +1136,7 @@ def print_validation_summary(checks: list[dict]) -> None:
         "SKIPPED": sum(check.get("status") == "SKIPPED" for check in checks),
     }
 
-    print("\\n" + "=" * 68)
+    print("\n" + "=" * 68)
     print("RELQON | VALIDATION RESULTS")
     print("=" * 68)
     print(f"Checks: {len(checks)} total | {counts['PASS']} passed | "
