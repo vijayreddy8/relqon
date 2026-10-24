@@ -19,24 +19,26 @@ Checks that require an unavailable tool may be marked `SKIPPED`; recovery guidan
 - Git for automatic change detection.
 - Optional tools for relevant checks: Docker, Terraform, and Kubernetes tooling.
 
-Install Python dependencies:
+Install Relqon in editable mode with its test dependencies:
 
 ```bash
-python -m pip install -r requirements.txt
+python -m pip install -e ".[test]"
 ```
+
+Alternatively, install runtime dependencies only with `python -m pip install -e .`.
 
 ## Run Relqon
 
 From the repository root:
 
 ```bash
-python src/relqon/cli.py run .
+relqon run .
 ```
 
 To include specific changed files explicitly:
 
 ```bash
-python src/relqon/cli.py run . --changed-file src/relqon/cli.py --changed-file infra/main.tf
+relqon run . --changed-file src/relqon/cli.py --changed-file infra/main.tf
 ```
 
 Relqon also detects staged, unstaged, and untracked files using Git. Explicit paths should be project-relative.
