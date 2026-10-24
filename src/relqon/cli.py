@@ -479,6 +479,55 @@ def generate_report(
     return report_path
 
 
+def run_pytest(project_path: Path) -> dict:
+    """Run unit tests and return a structured result for the JSON report."""
+
+    started = time.perf_counter()
+
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "tests/",
+                "-v",
+                "--ignore=tests/python_validation/broken_test.py",
+            ],
+            cwd=project_path,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+
+        output = (result.stdout + "\n" + result.stderr).strip()
+
+        return {
+            "name": "Pytest unit tests",
+            "status": "PASS" if result.returncode == 0 else "FAIL",
+            "duration_seconds": round(time.perf_counter() - started, 3),
+            "error": None if result.returncode == 0 else output[-4000:],
+            "output": output[-4000:],
+        }
+
+    except subprocess.TimeoutExpired:
+        return {
+            "name": "Pytest unit tests",
+            "status": "FAIL",
+            "duration_seconds": round(time.perf_counter() - started, 3),
+            "error": "Pytest timed out after 120 seconds.",
+        }
+
+    except OSError as exc:
+        return {
+            "name": "Pytest unit tests",
+            "status": "FAIL",
+            "duration_seconds": round(time.perf_counter() - started, 3),
+            "error": str(exc),
+        }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Relqon - Automated DevOps Change Impact & Recovery Platform"
@@ -522,6 +571,7 @@ def main() -> int:
         print(f"  Reason: {reason}")
 
     checks = []
+    checks.append(run_pytest(project_path))
 
     if "python_check" in impact["checks"]:
         checks.append(validate_python(project_path, changed_files))
