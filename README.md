@@ -15,37 +15,57 @@ Checks that require an unavailable tool may be marked `SKIPPED`; recovery guidan
 
 ## Architecture
 
-The diagram below shows how Relqon turns changed files into targeted validation results and a report.
+Relqon helps developers validate only what matters after code changes. This diagram shows the flow from changed files to validation results and reports.
 
 ```mermaid
 flowchart TD
-    A["Developer changes files"] --> B["Relqon CLI"]
-    B --> C["Detect changed files<br/>Git or explicit paths"]
-    C --> D["Impact analysis<br/>Map files to relevant checks"]
-    D --> E{"Which checks apply?"}
-    E -->|Python changes| F["Python syntax validation"]
-    E -->|Docker changes| G["Docker build validation"]
-    E -->|Kubernetes changes| H["Kubernetes manifest validation"]
-    E -->|Terraform changes| I["Terraform format and config validation"]
-    E -->|Project changes| J["Pytest and failure-detection self-tests"]
-    F --> K["Collect check results"]
-    G --> K
-    H --> K
-    I --> K
-    J --> K
-    K --> L["Overall status and recovery guidance"]
-    L --> M["JSON report<br/>reports/validation-report.json"]
-    L --> N["GitHub Actions summary<br/>and downloadable artifact"]
+    A(["Developer changes code"]) --> B["Relqon CLI"]
+    B --> C["1. Detect changed files<br/>Git or explicit paths"]
+    C --> D["2. Impact analysis<br/>Choose relevant checks"]
 
-    classDef input fill:#e8f1ff,stroke:#4778b8,color:#142b45
-    classDef process fill:#eef8ee,stroke:#4b8b55,color:#183b20
-    classDef output fill:#fff3df,stroke:#bd8531,color:#4b3210
-    class A,B,C input
-    class D,E,F,G,H,I,J,K,L process
-    class M,N output
+    D --> E["Python validation"]
+    D --> F["Docker build validation"]
+    D --> G["Kubernetes manifest validation"]
+    D --> H["Terraform validation"]
+    D --> I["Project tests"]
+
+    E --> J["3. Collect check results"]
+    F --> J
+    G --> J
+    H --> J
+    I --> J
+
+    J --> K{"4. Overall result"}
+    K -->|All checks pass| L["PASS"]
+    K -->|A check fails| M["FAIL"]
+    K -->|A required tool is missing| N["SKIPPED"]
+
+    L --> O["5. Generate report"]
+    M --> O
+    N --> O
+
+    O --> P["JSON report<br/>Detailed check results"]
+    O --> Q["Recovery guidance<br/>Suggested fixes"]
+    O --> R["GitHub Actions<br/>Readable CI summary and artifact"]
+
+    classDef start fill:#dceafe,stroke:#4778b8,color:#142b45
+    classDef process fill:#e4f5e8,stroke:#47845a,color:#173b22
+    classDef decision fill:#fff0d6,stroke:#bd8531,color:#543800
+    classDef success fill:#d7f5df,stroke:#218344,color:#124b27
+    classDef failure fill:#ffe2e2,stroke:#c74444,color:#711d1d
+    classDef skipped fill:#eeeeee,stroke:#777777,color:#333333
+    classDef output fill:#e9e2ff,stroke:#8063b2,color:#32234f
+
+    class A,B start
+    class C,D,E,F,G,H,I,J,O process
+    class K decision
+    class L success
+    class M failure
+    class N skipped
+    class P,Q,R output
 ```
 
-**How to read it:** Relqon first finds changed files, then runs only the checks relevant to those changes. It combines the results into an overall status and recovery guidance. Results are written to JSON; in CI, a readable summary and report artifact are also provided. If a required external tool is unavailable, the relevant check may be marked `SKIPPED`.
+**In short:** Relqon detects changes, selects relevant validations, collects the results, and produces a report with recovery guidance. In GitHub Actions, the run also provides a readable summary and a downloadable report artifact. Checks may be marked `SKIPPED` when a required external tool is unavailable.
 
 ## Requirements
 
