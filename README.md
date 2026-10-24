@@ -70,4 +70,4 @@ The intentionally broken Python fixture is excluded from the normal test run bec
 
 ## CI
 
-GitHub Actions workflows run Relqon CI checks and unit tests on repository changes. See the [Actions page](https://github.com/vijayreddy8/relqon/actions).
+GitHub Actions workflows run Relqon CI checks and unit tests on repository changes. The Relqon CI workflow publishes a readable validation summary in the workflow run, including check statuses, durations, changed files, impact-analysis reasons, and recovery guidance. It also uploads `reports/validation-report.json` as the `relqon-validation-report` artifact for download. If the report cannot be generated or parsed, the workflow summary records a diagnostic message.\n\nSee the [Actions page](https://github.com/vijayreddy8/relqon/actions) to inspect recent runs and download reports.
