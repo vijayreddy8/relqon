@@ -844,3 +844,16 @@ def test_terraform_fmt_oserror_returns_structured_failure(tmp_path, monkeypatch)
     assert "permission denied" in result["error"].lower()
     assert result["steps"][0]["name"] == "terraform fmt -check -diff"
     assert result["steps"][0]["status"] == "FAIL"
+
+
+
+def test_impact_analysis_ignores_empty_and_dot_paths():
+    from relqon.cli import analyse_impact
+
+    result = analyse_impact(["", "   ", ".", "src/app.py"])
+
+    assert result["checks"] == ["python_check"]
+    assert len(result["reasons"]) == 4
+    ignored = [reason for reason in result["reasons"] if "was ignored" in reason]
+    assert len(ignored) == 3
+    assert any("src/app.py" in reason for reason in result["reasons"])
