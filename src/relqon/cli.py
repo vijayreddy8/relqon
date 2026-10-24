@@ -1,6 +1,7 @@
 
 import argparse
 import json
+import codecs
 import shutil
 import subprocess
 import sys
@@ -13,47 +14,13 @@ from pathlib import Path
 def _decode_git_status_path(filename: str) -> str:
     """Decode Git's quoted path format for unusual filenames."""
     if len(filename) >= 2 and filename.startswith('"') and filename.endswith('"'):
+        # Git's quoted path syntax is close to C string escaping. Decode the
+        # standard escapes and octal bytes while preserving unknown escapes.
         raw = filename[1:-1]
-        decoded = []
-        index = 0
-        escapes = {
-            "a": "\\a",
-            "b": "\\b",
-            "t": "\\t",
-            "n": "\\n",
-            "v": "\\v",
-            "f": "\\f",
-            "r": "\\r",
-            '"': '"',
-        }
-        while index < len(raw):
-            char = raw[index]
-            if char != "\\" or index + 1 >= len(raw):
-                decoded.append(char)
-                index += 1
-                continue
-            next_char = raw[index + 1]
-            if next_char in escapes:
-                decoded.append(escapes[next_char])
-                index += 2
-            elif next_char in "01234567":
-                # Git emits UTF-8 bytes as octal escapes for non-ASCII paths.
-                octets = bytearray()
-                while (
-                    index + 1 < len(raw)
-                    and raw[index] == "\\"
-                    and raw[index + 1] in "01234567"
-                ):
-                    end = index + 2
-                    while end < min(index + 4, len(raw)) and raw[end] in "01234567":
-                        end += 1
-                    octets.append(int(raw[index + 1:end], 8))
-                    index = end
-                decoded.append(octets.decode("utf-8", errors="replace"))
-            else:
-                decoded.append(next_char)
-                index += 2
-        return "".join(decoded)
+        try:
+            return codecs.decode(raw, "unicode_escape")
+        except (UnicodeDecodeError, ValueError):
+            return raw
     return filename
 
 
