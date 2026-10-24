@@ -79,6 +79,15 @@ def analyse_impact(changed_files: list[str]) -> dict:
 
     for filename in changed_files:
         path = Path(filename)
+
+        # Explicit and Git-reported paths must stay project-relative.
+        # Reject absolute paths and traversal before they influence validators.
+        if path.is_absolute() or ".." in path.parts:
+            reasons.append(
+                f"{filename}: path is outside the project-relative boundary and was ignored."
+            )
+            continue
+
         name = path.name.lower()
         parts = {part.lower() for part in path.parts}
 
