@@ -205,6 +205,165 @@ def validate_python(
     }
 
 
+def validate_kubernetes(
+    project_path: Path,
+    changed_files: list[str],
+) -> dict:
+    """Validate changed Kubernetes YAML manifests and Helm chart metadata."""
+
+    started = time.perf_counter()
+    candidates = []
+
+    for filename in changed_files:
+        path = Path(filename)
+        parts = {part.lower() for part in path.parts}
+        name = path.name.lower()
+        is_kubernetes_path = bool(
+            {"k8s", "kubernetes", "helm"} & parts
+        ) or name == "chart.yaml"
+
+        if not is_kubernetes_path:
+            continue
+
+        if path.suffix.lower() not in {".yaml", ".yml"}:
+            continue
+
+        # Helm templates contain Go-template expressions and need helm lint.
+        if "templates" in parts:
+            continue
+
+        candidates.append(filename)
+
+    if not candidates:
+        return {
+            "name": "Kubernetes YAML validation",
+            "status": "SKIPPED",
+            "duration_seconds": round(time.perf_counter() - started, 3),
+            "error": "No changed Kubernetes YAML manifests or Chart.yaml files to validate.",
+            "files_checked": [],
+            "kubectl_validation": {
+                "status": "SKIPPED",
+                "details": "No manifest files were selected.",
+            },
+        }
+
+    try:
+        import yaml
+    except ImportError:
+        return {
+            "name": "Kubernetes YAML validation",
+            "status": "FAIL",
+            "duration_seconds": round(time.perf_counter() - started, 3),
+            "error": "PyYAML is required. Install it with: python -m pip install pyyaml",
+            "files_checked": [],
+        }
+
+    errors = []
+    checked_files = []
+    manifest_files = []
+
+    for filename in candidates:
+        file_path = (project_path / filename).resolve()
+
+        try:
+            file_path.relative_to(project_path.resolve())
+        except ValueError:
+            errors.append(f"{filename}: file is outside the project directory.")
+            continue
+
+        # A deleted manifest is a valid change; there is nothing left to parse.
+        if not file_path.exists():
+            continue
+
+        try:
+            with file_path.open("r", encoding="utf-8") as stream:
+                documents = list(yaml.safe_load_all(stream))
+
+            if not documents or all(document is None for document in documents):
+                raise ValueError("YAML file is empty.")
+
+            if file_path.name.lower() != "chart.yaml":
+                for index, document in enumerate(documents, start=1):
+                    if document is None:
+                        continue
+                    if not isinstance(document, dict):
+                        raise ValueError(
+                            f"Document {index} must be a YAML mapping/object."
+                        )
+                    missing = [
+                        field for field in ("apiVersion", "kind", "metadata")
+                        if field not in document
+                    ]
+                    if missing:
+                        raise ValueError(
+                            f"Document {index} is missing required field(s): "
+                            + ", ".join(missing)
+                        )
+                    if not isinstance(document["metadata"], dict):
+                        raise ValueError(
+                            f"Document {index} metadata must be a YAML mapping/object."
+                        )
+                    if not document["metadata"].get("name"):
+                        raise ValueError(
+                            f"Document {index} metadata.name is required."
+                        )
+
+            checked_files.append(filename)
+            if file_path.name.lower() != "chart.yaml":
+                manifest_files.append(filename)
+
+        except (yaml.YAMLError, OSError, ValueError) as exc:
+            errors.append(f"{filename}: {exc}")
+
+    kubectl_result = {
+        "status": "SKIPPED",
+        "details": "kubectl is not installed; YAML syntax and basic manifest structure were checked.",
+    }
+
+    kubectl = shutil.which("kubectl")
+    if kubectl and manifest_files and not errors:
+        kubectl_errors = []
+        for filename in manifest_files:
+            result = subprocess.run(
+                [
+                    kubectl,
+                    "apply",
+                    "--dry-run=client",
+                    "--validate=false",
+                    "-f",
+                    str((project_path / filename).resolve()),
+                ],
+                cwd=project_path,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=60,
+            )
+            if result.returncode != 0:
+                output = (result.stderr or result.stdout or "kubectl dry-run failed").strip()
+                kubectl_errors.append(f"{filename}: {output[-2000:]}")
+
+        kubectl_result = {
+            "status": "PASS" if not kubectl_errors else "FAIL",
+            "details": (
+                "kubectl client dry-run passed for all selected manifests."
+                if not kubectl_errors
+                else "\n".join(kubectl_errors)[:4000]
+            ),
+        }
+        if kubectl_errors:
+            errors.extend(kubectl_errors)
+
+    return {
+        "name": "Kubernetes YAML validation",
+        "status": "FAIL" if errors else "PASS",
+        "duration_seconds": round(time.perf_counter() - started, 3),
+        "error": "\n".join(errors)[:4000] if errors else None,
+        "files_checked": checked_files,
+        "kubectl_validation": kubectl_result,
+    }
+
+
 def validate_docker(project_path: Path) -> dict:
     """Build the project's Docker image to validate its Dockerfile."""
 
@@ -580,12 +739,7 @@ def main() -> int:
         checks.append(validate_docker(project_path))
 
     if "kubernetes_check" in impact["checks"]:
-        checks.append({
-            "name": "Kubernetes validation",
-            "status": "SKIPPED",
-            "duration_seconds": 0,
-            "error": "Kubernetes validation is not implemented yet.",
-        })
+        checks.append(validate_kubernetes(project_path, changed_files))
 
     if "terraform_check" in impact["checks"]:
         checks.append({
