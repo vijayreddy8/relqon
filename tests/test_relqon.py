@@ -58,10 +58,22 @@ def test_kubernetes_yaml_validates_manifest_structure(tmp_path):
     manifest = tmp_path / "k8s" / "deployment.yaml"
     manifest.parent.mkdir()
     manifest.write_text(
-        "apiVersion: apps/v1\n"
-        "kind: Deployment\n"
-        "metadata:\n"
-        "  name: sample-app\n",
+        "apiVersion: apps/v1\\n"
+        "kind: Deployment\\n"
+        "metadata:\\n"
+        "  name: sample-app\\n"
+        "spec:\\n"
+        "  selector:\\n"
+        "    matchLabels:\\n"
+        "      app: sample\\n"
+        "  template:\\n"
+        "    metadata:\\n"
+        "      labels:\\n"
+        "        app: sample\\n"
+        "    spec:\\n"
+        "      containers:\\n"
+        "        - name: app\\n"
+        "          image: nginx:stable\\n",
         encoding="utf-8",
     )
 
