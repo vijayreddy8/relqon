@@ -794,5 +794,9 @@ def test_impact_analysis_ignores_absolute_and_traversal_paths():
     ])
 
     assert result["checks"] == ["python_check"]
-    assert len(result["reasons"]) == 1
-    assert "src/relqon/safe.py" in result["reasons"][0]
+    assert len(result["reasons"]) == 3
+    assert any("src/relqon/safe.py" in reason for reason in result["reasons"])
+    ignored_reasons = [reason for reason in result["reasons"] if "was ignored" in reason]
+    assert len(ignored_reasons) == 2
+    assert any("../outside/Dockerfile" in reason for reason in ignored_reasons)
+    assert any("/tmp/unsafe.py" in reason for reason in ignored_reasons)
