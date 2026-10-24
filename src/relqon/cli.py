@@ -13,13 +13,21 @@ from pathlib import Path
 def get_changed_files(project_path: Path) -> list[str]:
     """Get changed, staged, and untracked files from Git."""
 
-    result = subprocess.run(
-        ["git", "status", "--short", "--untracked-files=all"],
-        cwd=project_path,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "status", "--short", "--untracked-files=all"],
+            cwd=project_path,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        print("Warning: Git status timed out; continuing without detected changes.")
+        return []
+    except OSError as exc:
+        print(f"Warning: Could not read Git status: {exc}")
+        return []
 
     if result.returncode != 0:
         print("Warning: Could not read Git status.")
