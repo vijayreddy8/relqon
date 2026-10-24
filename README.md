@@ -13,6 +13,40 @@
 
 Checks that require an unavailable tool may be marked `SKIPPED`; recovery guidance is included where available.
 
+## Architecture
+
+The diagram below shows how Relqon turns changed files into targeted validation results and a report.
+
+```mermaid
+flowchart TD
+    A["Developer changes files"] --> B["Relqon CLI"]
+    B --> C["Detect changed files<br/>Git or explicit paths"]
+    C --> D["Impact analysis<br/>Map files to relevant checks"]
+    D --> E{"Which checks apply?"}
+    E -->|Python changes| F["Python syntax validation"]
+    E -->|Docker changes| G["Docker build validation"]
+    E -->|Kubernetes changes| H["Kubernetes manifest validation"]
+    E -->|Terraform changes| I["Terraform format and config validation"]
+    E -->|Project changes| J["Pytest and failure-detection self-tests"]
+    F --> K["Collect check results"]
+    G --> K
+    H --> K
+    I --> K
+    J --> K
+    K --> L["Overall status and recovery guidance"]
+    L --> M["JSON report<br/>reports/validation-report.json"]
+    L --> N["GitHub Actions summary<br/>and downloadable artifact"]
+
+    classDef input fill:#e8f1ff,stroke:#4778b8,color:#142b45
+    classDef process fill:#eef8ee,stroke:#4b8b55,color:#183b20
+    classDef output fill:#fff3df,stroke:#bd8531,color:#4b3210
+    class A,B,C input
+    class D,E,F,G,H,I,J,K,L process
+    class M,N output
+```
+
+**How to read it:** Relqon first finds changed files, then runs only the checks relevant to those changes. It combines the results into an overall status and recovery guidance. Results are written to JSON; in CI, a readable summary and report artifact are also provided. If a required external tool is unavailable, the relevant check may be marked `SKIPPED`.
+
 ## Requirements
 
 - Python 3.10+ (use the version configured by project CI if newer).
