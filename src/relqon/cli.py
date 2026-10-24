@@ -1101,6 +1101,79 @@ def run_pytest(project_path: Path) -> dict:
         }
 
 
+def _console_detail_lines(check: dict, limit: int = 5) -> list[str]:
+    """Return a short, useful cross-platform console summary for a check."""
+    raw = str(check.get("error") or "").strip()
+    output = str(check.get("output") or "").strip()
+    if not raw and check.get("status") != "SKIPPED":
+        return []
+
+    source = raw or output
+    lines = [line.strip() for line in source.splitlines() if line.strip()]
+    if not lines:
+        return []
+
+    # Pytest output can be hundreds of lines. Prefer failing test names and
+    # the concise short-test summary over a wall of traceback text.
+    if "pytest" in str(check.get("name", "")).lower():
+        useful = [
+            line for line in lines
+            if line.startswith(("FAILED ", "ERROR "))
+            or "short test summary info" in line.lower()
+            or line.startswith(("E   ", "E "))
+        ]
+        if useful:
+            lines = useful
+
+    return lines[:limit]
+
+
+def print_validation_summary(checks: list[dict]) -> None:
+    """Print an easy-to-scan summary that works in PowerShell, bash and VS Code."""
+    counts = {
+        "PASS": sum(check.get("status") == "PASS" for check in checks),
+        "FAIL": sum(check.get("status") == "FAIL" for check in checks),
+        "SKIPPED": sum(check.get("status") == "SKIPPED" for check in checks),
+    }
+
+    print("\\n" + "=" * 68)
+    print("RELQON | VALIDATION RESULTS")
+    print("=" * 68)
+    print(f"Checks: {len(checks)} total | {counts['PASS']} passed | "
+          f"{counts['FAIL']} failed | {counts['SKIPPED']} skipped")
+    print("-" * 68)
+
+    for check in checks:
+        status = str(check.get("status", "UNKNOWN")).upper()
+        symbol = {"PASS": "[PASS]", "FAIL": "[FAIL]", "SKIPPED": "[SKIP]"}.get(
+            status, f"[{status}]"
+        )
+        duration = check.get("duration_seconds", 0)
+        print(f"{symbol:<8} {check.get('name', 'Unnamed check')} "
+              f"({duration:.2f}s)")
+
+        for detail in _console_detail_lines(check):
+            print(f"         {detail[:220]}")
+
+        guidance = check.get("recovery_guidance", [])
+        if status == "FAIL" and guidance:
+            print("         Suggested fix:")
+            for suggestion in guidance[:2]:
+                print(f"           -> {suggestion}")
+
+        if status == "SKIPPED" and check.get("error"):
+            print("         Why skipped: " + str(check["error"]).splitlines()[0][:220])
+
+    print("-" * 68)
+    if counts["FAIL"]:
+        print("RESULT: FAIL - Fix the failed check(s) above, then run Relqon again.")
+    elif counts["SKIPPED"]:
+        print("RESULT: COMPLETED WITH SKIPS - Install/configure optional tools if needed.")
+    else:
+        print("RESULT: ALL CHECKS PASSED")
+    print("=" * 68)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Relqon - Automated DevOps Change Impact & Recovery Platform"
@@ -1176,17 +1249,7 @@ def main() -> int:
     # Include actionable recovery advice in the JSON report for failed/skipped checks.
     checks = [add_recovery_guidance(check) for check in checks]
 
-    print("\nRelqon - Validation Summary")
-
-    for check in checks:
-        duration = check.get("duration_seconds", 0)
-        print(
-            f'{check["name"]}: {check["status"]} '
-            f'({duration:.3f} seconds)'
-        )
-
-        if check.get("error"):
-            print(f'  Details: {check["error"]}')
+    print_validation_summary(checks)
 
     total_duration = time.perf_counter() - started
 
