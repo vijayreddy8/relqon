@@ -25,11 +25,11 @@ def _decode_git_status_path(filename: str) -> str:
             "f": "\\f",
             "r": "\\r",
             '"': '"',
-            "\\\\": "\\\\",
+            "\\": "\\",
         }
         while index < len(raw):
             char = raw[index]
-            if char != "\\\\" or index + 1 >= len(raw):
+            if char != "\\" or index + 1 >= len(raw):
                 decoded.append(char)
                 index += 1
                 continue
@@ -42,7 +42,7 @@ def _decode_git_status_path(filename: str) -> str:
                 octets = bytearray()
                 while (
                     index + 1 < len(raw)
-                    and raw[index] == "\\\\"
+                    and raw[index] == "\\"
                     and raw[index + 1] in "01234567"
                 ):
                     end = index + 2
