@@ -752,3 +752,33 @@ def test_python_validation_rejects_path_outside_project(tmp_path):
     assert result["status"] == "FAIL"
     assert "outside the project directory" in result["error"]
     assert result["files_checked"] == []
+
+
+def test_get_changed_files_handles_git_command_oserror(tmp_path, monkeypatch, capsys):
+    import subprocess
+    import relqon.cli as cli
+
+    def fail_git(*args, **kwargs):
+        raise OSError("git executable unavailable")
+
+    monkeypatch.setattr(cli.subprocess, "run", fail_git)
+
+    changed_files = cli.get_changed_files(tmp_path)
+
+    assert changed_files == []
+    assert "Could not read Git status" in capsys.readouterr().out
+
+
+def test_get_changed_files_handles_git_status_timeout(tmp_path, monkeypatch, capsys):
+    import subprocess
+    import relqon.cli as cli
+
+    def timeout_git(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="git status", timeout=30)
+
+    monkeypatch.setattr(cli.subprocess, "run", timeout_git)
+
+    changed_files = cli.get_changed_files(tmp_path)
+
+    assert changed_files == []
+    assert "timed out" in capsys.readouterr().out.lower()
