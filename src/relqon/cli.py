@@ -153,23 +153,31 @@ def analyse_impact(changed_files: list[str]) -> dict:
         # Test fixtures are handled by dedicated self-tests.
         is_test_file = "tests" in parts or "test" in parts
 
+        # Docker configuration impacts container build validation.
         if (
             name == "dockerfile"
             or name in {"docker-compose.yml", "docker-compose.yaml"}
         ):
             checks.add("docker_build")
-            reasons.append(
-                f"{filename}: Docker configuration changed."
-            )
+            reasons.append(f"{filename}: Docker configuration changed.")
 
+        # Python source and dependency manifests are supported directly.
         if not is_test_file and (
             path.suffix.lower() == ".py"
             or name in {"requirements.txt", "pyproject.toml"}
         ):
             checks.add("python_check")
-            reasons.append(
-                f"{filename}: Python code or dependencies changed."
-            )
+            reasons.append(f"{filename}: Python code or dependencies changed.")
+
+        # JavaScript/TypeScript and Node package manifests (e.g. React/Vite,
+        # Express APIs) use the npm build scripts declared by each package.
+        if (
+            path.suffix.lower() in {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
+            or name == "package.json"
+            or name == "package-lock.json"
+        ):
+            checks.add("node_check")
+            reasons.append(f"{filename}: Node.js/JavaScript/TypeScript source or package manifest changed.")
 
         if (
             "k8s" in parts
@@ -178,15 +186,11 @@ def analyse_impact(changed_files: list[str]) -> dict:
             or name == "chart.yaml"
         ):
             checks.add("kubernetes_check")
-            reasons.append(
-                f"{filename}: Kubernetes or Helm configuration changed."
-            )
+            reasons.append(f"{filename}: Kubernetes or Helm configuration changed.")
 
         if path.suffix.lower() in {".tf", ".tfvars"}:
             checks.add("terraform_check")
-            reasons.append(
-                f"{filename}: Terraform configuration changed."
-            )
+            reasons.append(f"{filename}: Terraform configuration changed.")
 
     return {
         "checks": sorted(checks),
@@ -278,6 +282,135 @@ def validate_python(
         ),
         "error": "\n".join(errors)[:4000] if errors else None,
         "files_checked": checked_files,
+    }
+
+
+def validate_node(project_path: Path, changed_files: list[str]) -> dict:
+    """Run build/type-check scripts for changed Node.js projects.
+
+    Each changed package manifest or JS/TS file is mapped to its nearest
+    package.json directory. Validation only runs if that package declares a
+    build script, so source files are not falsely reported as buildable.
+    """
+    started = time.perf_counter()
+    package_dirs = set()
+
+    for filename in changed_files:
+        path = Path(filename)
+        if (
+            path.suffix.lower() in {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
+            or path.name.lower() in {"package.json", "package-lock.json"}
+        ):
+            candidate = (project_path / path).resolve()
+            try:
+                candidate.relative_to(project_path.resolve())
+            except ValueError:
+                continue
+
+            folder = candidate if candidate.is_dir() else candidate.parent
+            for directory in (folder, *folder.parents):
+                if directory == project_path.parent:
+                    break
+                if (directory / "package.json").is_file():
+                    package_dirs.add(directory)
+                    break
+                if directory == project_path:
+                    break
+
+    if not package_dirs:
+        return {
+            "name": "Node.js build validation",
+            "status": "SKIPPED",
+            "duration_seconds": round(time.perf_counter() - started, 3),
+            "error": "No package.json found for the changed Node.js files.",
+            "files_checked": [],
+            "steps": [],
+        }
+
+    npm = shutil.which("npm")
+    if npm is None:
+        return {
+            "name": "Node.js build validation",
+            "status": "SKIPPED",
+            "duration_seconds": round(time.perf_counter() - started, 3),
+            "error": "npm is not installed or not available on PATH. Install Node.js 20+ to enable package builds.",
+            "files_checked": [],
+            "steps": [],
+        }
+
+    errors = []
+    steps = []
+    checked = []
+    for package_dir in sorted(package_dirs):
+        package_file = package_dir / "package.json"
+        try:
+            package = json.loads(package_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"{package_file.relative_to(project_path)}: cannot read valid package.json: {exc}")
+            continue
+
+        scripts = package.get("scripts", {})
+        relative_dir = str(package_dir.relative_to(project_path))
+        if not isinstance(scripts, dict) or not scripts.get("build"):
+            steps.append({
+                "name": "npm run build",
+                "directory": relative_dir,
+                "status": "SKIPPED",
+                "details": "No build script is declared in this package.json.",
+            })
+            continue
+
+        if not (package_dir / "node_modules").is_dir():
+            steps.append({
+                "name": "npm run build",
+                "directory": relative_dir,
+                "status": "SKIPPED",
+                "details": "Dependencies are not installed (node_modules is missing). Run npm ci in this directory.",
+            })
+            continue
+
+        try:
+            result = subprocess.run(
+                [npm, "run", "build"],
+                cwd=package_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=300,
+            )
+            output = (result.stdout + "\\n" + result.stderr).strip()
+            status = "PASS" if result.returncode == 0 else "FAIL"
+            steps.append({
+                "name": "npm run build",
+                "directory": relative_dir,
+                "status": status,
+                "details": output[-3000:] or ("Build completed." if status == "PASS" else "Build failed with no diagnostic output."),
+            })
+            checked.append(relative_dir)
+            if result.returncode != 0:
+                errors.append(f"{relative_dir}: npm run build failed. Review the compiler/build diagnostics above.")
+        except subprocess.TimeoutExpired:
+            errors.append(f"{relative_dir}: npm run build timed out after 300 seconds.")
+            steps.append({"name": "npm run build", "directory": relative_dir, "status": "FAIL", "details": "Build timed out after 300 seconds."})
+        except OSError as exc:
+            errors.append(f"{relative_dir}: could not run npm build: {exc}")
+            steps.append({"name": "npm run build", "directory": relative_dir, "status": "FAIL", "details": str(exc)})
+
+    runnable = [step for step in steps if step["status"] != "SKIPPED"]
+    if errors:
+        status = "FAIL"
+    elif runnable:
+        status = "PASS"
+    else:
+        status = "SKIPPED"
+
+    return {
+        "name": "Node.js build validation",
+        "status": status,
+        "duration_seconds": round(time.perf_counter() - started, 3),
+        "error": "\\n".join(errors)[:4000] if errors else None,
+        "files_checked": checked,
+        "steps": steps,
     }
 
 
@@ -1232,6 +1365,9 @@ def main() -> int:
 
     if "python_check" in impact["checks"]:
         checks.append(validate_python(project_path, changed_files))
+
+    if "node_check" in impact["checks"]:
+        checks.append(validate_node(project_path, changed_files))
 
     if "docker_build" in impact["checks"]:
         checks.append(validate_docker(project_path))
