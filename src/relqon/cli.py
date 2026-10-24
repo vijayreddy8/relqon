@@ -205,6 +205,149 @@ def validate_python(
     }
 
 
+def validate_terraform(project_path: Path, changed_files: list[str]) -> dict:
+    """Run Terraform formatting and configuration validation for changed files."""
+
+    started = time.perf_counter()
+    candidates = sorted({
+        filename for filename in changed_files
+        if Path(filename).suffix.lower() in {".tf", ".tfvars"}
+    })
+
+    if not candidates:
+        return {
+            "name": "Terraform validation",
+            "status": "SKIPPED",
+            "duration_seconds": round(time.perf_counter() - started, 3),
+            "error": "No changed Terraform .tf or .tfvars files to validate.",
+            "files_checked": [],
+            "steps": [],
+        }
+
+    terraform = shutil.which("terraform")
+    if terraform is None:
+        return {
+            "name": "Terraform validation",
+            "status": "SKIPPED",
+            "duration_seconds": round(time.perf_counter() - started, 3),
+            "error": "Terraform CLI is not installed or not in PATH. Install Terraform to enable fmt and validate checks.",
+            "files_checked": [],
+            "steps": [],
+        }
+
+    errors = []
+    steps = []
+    checked_files = []
+    valid_files = []
+
+    for filename in candidates:
+        file_path = (project_path / filename).resolve()
+        try:
+            file_path.relative_to(project_path.resolve())
+        except ValueError:
+            errors.append(f"{filename}: file is outside the project directory.")
+            continue
+
+        if not file_path.is_file():
+            # Deleted Terraform files are valid changes; validate remaining files.
+            if filename not in get_changed_files(project_path):
+                continue
+            errors.append(f"{filename}: file not found.")
+            continue
+
+        valid_files.append(filename)
+
+    if not valid_files and not errors:
+        return {
+            "name": "Terraform validation",
+            "status": "PASS",
+            "duration_seconds": round(time.perf_counter() - started, 3),
+            "error": None,
+            "files_checked": [],
+            "steps": [{"name": "file selection", "status": "PASS", "details": "Only deleted Terraform files changed; no remaining files require validation."}],
+        }
+
+    fmt_result = subprocess.run(
+        [terraform, "fmt", "-check", "-diff", *[
+            str((project_path / filename).resolve()) for filename in valid_files
+        ]],
+        cwd=project_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    fmt_output = (fmt_result.stdout + "\\n" + fmt_result.stderr).strip()[-4000:]
+    steps.append({
+        "name": "terraform fmt -check -diff",
+        "status": "PASS" if fmt_result.returncode == 0 else "FAIL",
+        "details": fmt_output or ("All changed Terraform files are correctly formatted." if fmt_result.returncode == 0 else "Terraform formatting check failed."),
+    })
+    if fmt_result.returncode != 0:
+        errors.append("Terraform formatting check failed. Run 'terraform fmt' on the affected files.")
+
+    # Validate each Terraform root independently, without configuring a backend.
+    roots = sorted({
+        str((project_path / filename).resolve().parent)
+        for filename in valid_files
+        if Path(filename).suffix.lower() == ".tf"
+    })
+    for root in roots:
+        try:
+            init_result = subprocess.run(
+                [terraform, "init", "-backend=false", "-input=false", "-no-color"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=300,
+            )
+            init_output = (init_result.stdout + "\\n" + init_result.stderr).strip()[-3000:]
+            steps.append({
+                "name": "terraform init -backend=false",
+                "directory": str(Path(root).relative_to(project_path.resolve())),
+                "status": "PASS" if init_result.returncode == 0 else "FAIL",
+                "details": init_output or ("Initialization succeeded." if init_result.returncode == 0 else "Terraform initialization failed."),
+            })
+            if init_result.returncode != 0:
+                errors.append(f"{Path(root).relative_to(project_path.resolve())}: terraform init failed.")
+                continue
+
+            validate_result = subprocess.run(
+                [terraform, "validate", "-no-color"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=120,
+            )
+            validate_output = (validate_result.stdout + "\\n" + validate_result.stderr).strip()[-3000:]
+            steps.append({
+                "name": "terraform validate",
+                "directory": str(Path(root).relative_to(project_path.resolve())),
+                "status": "PASS" if validate_result.returncode == 0 else "FAIL",
+                "details": validate_output or ("Configuration is valid." if validate_result.returncode == 0 else "Terraform validation failed."),
+            })
+            if validate_result.returncode != 0:
+                errors.append(f"{Path(root).relative_to(project_path.resolve())}: terraform validate failed.")
+        except subprocess.TimeoutExpired as exc:
+            errors.append(f"{Path(root).relative_to(project_path.resolve())}: Terraform command timed out: {exc.cmd}.")
+            steps.append({"name": "Terraform command", "directory": str(Path(root).relative_to(project_path.resolve())), "status": "FAIL", "details": "Command timed out."})
+        except OSError as exc:
+            errors.append(f"{Path(root).relative_to(project_path.resolve())}: {exc}")
+            steps.append({"name": "Terraform command", "directory": str(Path(root).relative_to(project_path.resolve())), "status": "FAIL", "details": str(exc)})
+
+    checked_files.extend(valid_files)
+    return {
+        "name": "Terraform validation",
+        "status": "FAIL" if errors else "PASS",
+        "duration_seconds": round(time.perf_counter() - started, 3),
+        "error": "\\n".join(errors)[:4000] if errors else None,
+        "files_checked": checked_files,
+        "steps": steps,
+    }
+
+
 def _validate_kubernetes_document(document: dict, filename: str, index: int) -> None:
     """Validate common Kubernetes fields and Deployment/Service semantics."""
 
@@ -857,12 +1000,7 @@ def main() -> int:
         checks.append(validate_kubernetes(project_path, changed_files))
 
     if "terraform_check" in impact["checks"]:
-        checks.append({
-            "name": "Terraform validation",
-            "status": "SKIPPED",
-            "duration_seconds": 0,
-            "error": "Terraform validation is not implemented yet.",
-        })
+        checks.append(validate_terraform(project_path, changed_files))
 
     # Self-tests run independently of the changed files.
     checks.append(test_python_failure_detection())
