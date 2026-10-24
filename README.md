@@ -131,6 +131,42 @@ relqon run . --changed-file src/relqon/cli.py --changed-file infra/main.tf
 
 Relqon also detects staged, unstaged, and untracked files using Git. Explicit paths should be project-relative.
 
+## Terminal results and troubleshooting
+
+After validation, Relqon prints a compact, plain-text summary designed to be readable in **PowerShell, Ubuntu/Linux shells, macOS Terminal, and the VS Code integrated terminal**. It does not depend on ANSI colors or terminal-specific formatting.
+
+The summary includes:
+
+- Total number of checks, with **passed**, **failed**, and **skipped** counts.
+- A `[PASS]`, `[FAIL]`, or `[SKIP]` label for each check and its duration.
+- Short error details for failed checks, with concise failing-test information when available.
+- Suggested recovery steps for failures, plus the reason a check was skipped.
+- A final overall result so engineers can quickly see whether to investigate a failure or continue.
+
+Example output (illustrative only; real check names, counts, and messages depend on the project):
+
+```text
+====================================================================
+RELQON | VALIDATION RESULTS
+====================================================================
+Checks: 5 total | 3 passed | 1 failed | 1 skipped
+--------------------------------------------------------------------
+[PASS]   Python syntax validation (0.08s)
+[PASS]   Python failure detection test (0.12s)
+[PASS]   Docker build validation (2.41s)
+[FAIL]   Pytest unit tests (1.82s)
+         FAILED tests/test_relqon.py::test_example
+         Suggested fix:
+           -> Run the failing Python check and inspect the first error.
+[SKIP]   Terraform validation (0.01s)
+         Why skipped: Terraform CLI is not installed or not in PATH.
+--------------------------------------------------------------------
+RESULT: FAIL - Fix the failed check(s) above, then run Relqon again.
+====================================================================
+```
+
+The console output is a quick summary, not a replacement for full diagnostics. See the JSON report for structured details, and review the underlying tool output when the exact root cause is not obvious.
+
 ## JSON report
 
 After a run, Relqon writes `reports/validation-report.json`. The report contains changed files, impact-analysis reasons, individual check results, durations, recovery guidance, and an overall status (`PASS`, `FAIL`, or `SKIPPED`).
