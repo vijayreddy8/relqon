@@ -30,7 +30,7 @@ python -m pip install -r requirements.txt
 From the repository root:
 
 ```bash
-relqon run .
+python src/relqon/cli.py run .
 ```
 
 To include specific changed files explicitly:
