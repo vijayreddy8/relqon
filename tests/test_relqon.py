@@ -58,22 +58,22 @@ def test_kubernetes_yaml_validates_manifest_structure(tmp_path):
     manifest = tmp_path / "k8s" / "deployment.yaml"
     manifest.parent.mkdir()
     manifest.write_text(
-        "apiVersion: apps/v1\\n"
-        "kind: Deployment\\n"
-        "metadata:\\n"
-        "  name: sample-app\\n"
-        "spec:\\n"
-        "  selector:\\n"
-        "    matchLabels:\\n"
-        "      app: sample\\n"
-        "  template:\\n"
-        "    metadata:\\n"
-        "      labels:\\n"
-        "        app: sample\\n"
-        "    spec:\\n"
-        "      containers:\\n"
-        "        - name: app\\n"
-        "          image: nginx:stable\\n",
+        "apiVersion: apps/v1\n"
+        "kind: Deployment\n"
+        "metadata:\n"
+        "  name: sample-app\n"
+        "spec:\n"
+        "  selector:\n"
+        "    matchLabels:\n"
+        "      app: sample\n"
+        "  template:\n"
+        "    metadata:\n"
+        "      labels:\n"
+        "        app: sample\n"
+        "    spec:\n"
+        "      containers:\n"
+        "        - name: app\n"
+        "          image: nginx:stable\n",
         encoding="utf-8",
     )
 
@@ -111,22 +111,22 @@ def test_deployment_rejects_selector_mismatch(tmp_path):
     manifest = tmp_path / "k8s" / "deployment.yaml"
     manifest.parent.mkdir()
     manifest.write_text(
-        "apiVersion: apps/v1\\n"
-        "kind: Deployment\\n"
-        "metadata:\\n"
-        "  name: sample-app\\n"
-        "spec:\\n"
-        "  selector:\\n"
-        "    matchLabels:\\n"
-        "      app: expected\\n"
-        "  template:\\n"
-        "    metadata:\\n"
-        "      labels:\\n"
-        "        app: actual\\n"
-        "    spec:\\n"
-        "      containers:\\n"
-        "        - name: app\\n"
-        "          image: nginx:stable\\n",
+        "apiVersion: apps/v1\n"
+        "kind: Deployment\n"
+        "metadata:\n"
+        "  name: sample-app\n"
+        "spec:\n"
+        "  selector:\n"
+        "    matchLabels:\n"
+        "      app: expected\n"
+        "  template:\n"
+        "    metadata:\n"
+        "      labels:\n"
+        "        app: actual\n"
+        "    spec:\n"
+        "      containers:\n"
+        "        - name: app\n"
+        "          image: nginx:stable\n",
         encoding="utf-8",
     )
 
@@ -141,21 +141,21 @@ def test_deployment_requires_container_image(tmp_path):
     manifest = tmp_path / "k8s" / "deployment.yaml"
     manifest.parent.mkdir()
     manifest.write_text(
-        "apiVersion: apps/v1\\n"
-        "kind: Deployment\\n"
-        "metadata:\\n"
-        "  name: sample-app\\n"
-        "spec:\\n"
-        "  selector:\\n"
-        "    matchLabels:\\n"
-        "      app: sample\\n"
-        "  template:\\n"
-        "    metadata:\\n"
-        "      labels:\\n"
-        "        app: sample\\n"
-        "    spec:\\n"
-        "      containers:\\n"
-        "        - name: app\\n",
+        "apiVersion: apps/v1\n"
+        "kind: Deployment\n"
+        "metadata:\n"
+        "  name: sample-app\n"
+        "spec:\n"
+        "  selector:\n"
+        "    matchLabels:\n"
+        "      app: sample\n"
+        "  template:\n"
+        "    metadata:\n"
+        "      labels:\n"
+        "        app: sample\n"
+        "    spec:\n"
+        "      containers:\n"
+        "        - name: app\n",
         encoding="utf-8",
     )
 
@@ -170,13 +170,13 @@ def test_service_rejects_invalid_port(tmp_path):
     manifest = tmp_path / "k8s" / "service.yaml"
     manifest.parent.mkdir()
     manifest.write_text(
-        "apiVersion: v1\\n"
-        "kind: Service\\n"
-        "metadata:\\n"
-        "  name: sample-service\\n"
-        "spec:\\n"
-        "  ports:\\n"
-        "    - port: 70000\\n",
+        "apiVersion: v1\n"
+        "kind: Service\n"
+        "metadata:\n"
+        "  name: sample-service\n"
+        "spec:\n"
+        "  ports:\n"
+        "    - port: 70000\n",
         encoding="utf-8",
     )
 
@@ -191,8 +191,8 @@ def test_chart_yaml_requires_name_and_version(tmp_path):
     chart = tmp_path / "helm" / "Chart.yaml"
     chart.parent.mkdir()
     chart.write_text(
-        "apiVersion: v2\\n"
-        "name: sample-chart\\n",
+        "apiVersion: v2\n"
+        "name: sample-chart\n",
         encoding="utf-8",
     )
 
@@ -207,13 +207,13 @@ def test_kubernetes_validation_reports_kubectl_evidence_when_available(tmp_path,
     manifest = tmp_path / "k8s" / "service.yaml"
     manifest.parent.mkdir()
     manifest.write_text(
-        "apiVersion: v1\\n"
-        "kind: Service\\n"
-        "metadata:\\n"
-        "  name: sample-service\\n"
-        "spec:\\n"
-        "  ports:\\n"
-        "    - port: 80\\n",
+        "apiVersion: v1\n"
+        "kind: Service\n"
+        "metadata:\n"
+        "  name: sample-service\n"
+        "spec:\n"
+        "  ports:\n"
+        "    - port: 80\n",
         encoding="utf-8",
     )
 
