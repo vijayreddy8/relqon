@@ -1,0 +1,26 @@
+name: Relqon package smoke test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  package-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package and test dependencies
+        run: python -m pip install -e ".[test]"
+      - name: Verify installed CLI entry point
+        run: |
+          relqon --help
+          relqon run --help
+      - name: Verify package metadata
+        run: python -m pip show relqon
