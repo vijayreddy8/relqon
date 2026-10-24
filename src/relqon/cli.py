@@ -1,7 +1,9 @@
 
 import argparse
+import json
 import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 
@@ -31,22 +33,28 @@ SPECIAL_FILES = {
 
 
 def classify_file(filename: str) -> str:
-    """Classify a changed file by name or extension."""
+    """Classify a changed file by its name or extension."""
 
     name = Path(filename).name
 
     if name in SPECIAL_FILES:
         return SPECIAL_FILES[name]
+
     if name == "Jenkinsfile":
         return "Jenkins Pipeline"
+
     if name == ".gitignore":
         return "Git Configuration"
+
     if name == "requirements.txt":
         return "Python Dependencies"
+
     if name == "package.json":
         return "Node.js Dependencies"
+
     if name == "Chart.yaml":
         return "Helm Chart"
+
     if name.endswith(".tfvars"):
         return "Terraform Variables"
 
@@ -70,8 +78,10 @@ def get_changed_files(project_path: Path) -> list[str] | None:
 
     if result.returncode != 0:
         print("ERROR: Unable to read Git status.")
+
         if result.stderr.strip():
             print(result.stderr.strip())
+
         return None
 
     return [
@@ -103,8 +113,9 @@ def detect_changes(project_path: Path) -> int:
     print(f"Detected {len(changed_files)} changed file(s):\n")
 
     for filename in changed_files:
+        category = classify_file(filename)
         print(f"  File: {filename}")
-        print(f"  Type: {classify_file(filename)}\n")
+        print(f"  Type: {category}\n")
 
     print("Change classification complete.")
     return 0
@@ -129,7 +140,10 @@ def validate_docker(project_path: Path) -> bool:
     try:
         result = subprocess.run(
             [
-                "docker", "build", "--tag", "relqon-validation",
+                "docker",
+                "build",
+                "--tag",
+                "relqon-validation",
                 str(project_path),
             ],
             capture_output=True,
@@ -146,13 +160,15 @@ def validate_docker(project_path: Path) -> bool:
         return True
 
     print("FAIL: Docker image build failed.")
+
     if result.stderr.strip():
         print(result.stderr.strip())
+
     return False
 
 
 def test_failure_detection(project_path: Path) -> bool:
-    """Check that an intentionally invalid Dockerfile fails to build."""
+    """Verify that an intentionally invalid Dockerfile fails to build."""
 
     test_dockerfile = (
         project_path / "tests" / "docker_failure" / "Dockerfile"
@@ -172,9 +188,12 @@ def test_failure_detection(project_path: Path) -> bool:
     try:
         result = subprocess.run(
             [
-                "docker", "build",
-                "--tag", "relqon-failure-validation",
-                "--file", str(test_dockerfile),
+                "docker",
+                "build",
+                "--tag",
+                "relqon-failure-validation",
+                "--file",
+                str(test_dockerfile),
                 str(test_dockerfile.parent),
             ],
             capture_output=True,
@@ -187,11 +206,49 @@ def test_failure_detection(project_path: Path) -> bool:
         return False
 
     if result.returncode != 0:
-        print("PASS: Relqon observed the expected Docker build failure.")
+        print("PASS: Expected Docker build failure detected.")
         return True
 
-    print("FAIL: The invalid Dockerfile unexpectedly built successfully.")
+    print("FAIL: Invalid Dockerfile unexpectedly built successfully.")
     return False
+
+
+def generate_report(
+    project_path: Path,
+    docker_passed: bool,
+    failure_test_passed: bool,
+) -> Path:
+    """Save validation results to a JSON report."""
+
+    reports_dir = project_path / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    report = {
+        "project": "Relqon",
+        "timestamp": datetime.now().astimezone().isoformat(),
+        "results": {
+            "docker_build": "PASS" if docker_passed else "FAIL",
+            "failure_detection_test": (
+                "PASS" if failure_test_passed else "FAIL"
+            ),
+        },
+        "overall_status": (
+            "PASS"
+            if docker_passed and failure_test_passed
+            else "FAIL"
+        ),
+    }
+
+    report_path = reports_dir / "validation-report.json"
+
+    report_path.write_text(
+        json.dumps(report, indent=4),
+        encoding="utf-8",
+    )
+
+    print(f"\nJSON report saved: {report_path}")
+
+    return report_path
 
 
 def main() -> int:
@@ -199,11 +256,13 @@ def main() -> int:
         prog="relqon",
         description="Automated DevOps change detection and Docker validation",
     )
+
     parser.add_argument(
         "command",
         choices=["run"],
         help="Analyse project changes and validate Docker",
     )
+
     parser.add_argument(
         "path",
         nargs="?",
@@ -227,6 +286,16 @@ def main() -> int:
         "Failure detection test: "
         f"{'PASS' if failure_test_passed else 'FAIL'}"
     )
+
+    try:
+        generate_report(
+            project_path,
+            docker_passed,
+            failure_test_passed,
+        )
+    except OSError as error:
+        print(f"ERROR: Could not save JSON report: {error}")
+        return 1
 
     return 0 if docker_passed and failure_test_passed else 1
 
