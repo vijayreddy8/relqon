@@ -378,17 +378,18 @@ def validate_node(project_path: Path, changed_files: list[str]) -> dict:
                 check=False,
                 timeout=300,
             )
-            output = (result.stdout + "\\n" + result.stderr).strip()
+            output = (result.stdout + "\n" + result.stderr).strip()
             status = "PASS" if result.returncode == 0 else "FAIL"
+            diagnostic = output[-3000:] or ("Build completed." if status == "PASS" else "Build failed with no diagnostic output.")
             steps.append({
                 "name": "npm run build",
                 "directory": relative_dir,
                 "status": status,
-                "details": output[-3000:] or ("Build completed." if status == "PASS" else "Build failed with no diagnostic output."),
+                "details": diagnostic,
             })
             checked.append(relative_dir)
             if result.returncode != 0:
-                errors.append(f"{relative_dir}: npm run build failed. Review the compiler/build diagnostics above.")
+                errors.append(f"{relative_dir}: npm run build failed.\n{diagnostic[-1800:]}")
         except subprocess.TimeoutExpired:
             errors.append(f"{relative_dir}: npm run build timed out after 300 seconds.")
             steps.append({"name": "npm run build", "directory": relative_dir, "status": "FAIL", "details": "Build timed out after 300 seconds."})
@@ -1237,19 +1238,32 @@ def run_pytest(project_path: Path) -> dict:
 
 
 def _console_detail_lines(check: dict, limit: int = 5) -> list[str]:
-    """Return a short, useful cross-platform console summary for a check."""
-    raw = str(check.get("error") or "").strip()
-    output = str(check.get("output") or "").strip()
-    if not raw and check.get("status") != "SKIPPED":
-        return []
+    """Return concise errors plus useful failed-step diagnostics."""
+    sources = [
+        str(check.get("error") or "").strip(),
+        str(check.get("output") or "").strip(),
+    ]
+    for step in check.get("steps", []):
+        if step.get("status") == "FAIL":
+            label = step.get("directory") or step.get("name") or "failed step"
+            detail = str(step.get("details") or "").strip()
+            if detail:
+                sources.append(f"{label}: {detail}")
 
-    source = raw or output
+    source = "\n".join(item for item in sources if item)
+    if not source and check.get("status") != "SKIPPED":
+        return []
     lines = [line.strip() for line in source.splitlines() if line.strip()]
     if not lines:
         return []
 
-    # Pytest output can be hundreds of lines. Prefer failing test names and
-    # the concise short-test summary over a wall of traceback text.
+    # Avoid repeating the generic Node build message when detailed compiler
+    # diagnostics are available in the failed step output.
+    if "node.js build validation" in str(check.get("name", "")).lower():
+        detailed = [line for line in lines if "npm run build failed" not in line.lower()]
+        if detailed:
+            lines = detailed
+
     if "pytest" in str(check.get("name", "")).lower():
         useful = [
             line for line in lines
@@ -1331,6 +1345,11 @@ def main() -> int:
         default=[],
         help="Explicitly include a project-relative changed file for validation. May be repeated.",
     )
+    run_parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Also run Relqon's own pytest suite and failure-detection self-tests (slower).",
+    )
 
     args = parser.parse_args()
     project_path = Path(args.project_path).resolve()
@@ -1363,7 +1382,10 @@ def main() -> int:
         print(f"  Reason: {reason}")
 
     checks = []
-    checks.append(run_pytest(project_path))
+    # Keep the everyday scan lightweight. The tool's own test suite and
+    # intentional failure simulations are opt-in via --full.
+    if args.full:
+        checks.append(run_pytest(project_path))
 
     if "python_check" in impact["checks"]:
         checks.append(validate_python(project_path, changed_files))
@@ -1380,9 +1402,11 @@ def main() -> int:
     if "terraform_check" in impact["checks"]:
         checks.append(validate_terraform(project_path, changed_files))
 
-    # Self-tests run independently of the changed files.
-    checks.append(test_python_failure_detection())
-    checks.append(test_failure_detection(project_path))
+    # Self-tests intentionally simulate failures and may be slow/network-dependent.
+    # Run them only when explicitly requested.
+    if args.full:
+        checks.append(test_python_failure_detection())
+        checks.append(test_failure_detection(project_path))
 
     # Include actionable recovery advice in the JSON report for failed/skipped checks.
     checks = [add_recovery_guidance(check) for check in checks]
