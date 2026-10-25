@@ -951,3 +951,47 @@ def test_decode_git_status_path_preserves_escaped_backslash():
     from relqon.cli import _decode_git_status_path
 
     assert _decode_git_status_path(r'"folder\\name.py"') == r"folder\name.py"
+
+
+
+def test_console_summary_includes_failed_node_build_diagnostics():
+    from relqon.cli import _console_detail_lines
+
+    check = {
+        "name": "Node.js build validation",
+        "status": "FAIL",
+        "error": "frontend: npm run build failed. Review compiler/build diagnostics above.",
+        "steps": [{
+            "name": "npm run build",
+            "directory": "frontend",
+            "status": "FAIL",
+            "details": "src/App.tsx(10,7): error TS2322: Type 'string' is not assignable to type 'number'.",
+        }],
+    }
+
+    lines = _console_detail_lines(check)
+
+    assert any("TS2322" in line for line in lines)
+    assert any("src/App.tsx" in line for line in lines)
+
+
+def test_cli_parser_exposes_full_checks_flag(monkeypatch, tmp_path):
+    import relqon.cli as cli
+
+    monkeypatch.setattr(cli, "detect_changes", lambda project_path: (0, []))
+    monkeypatch.setattr(cli.sys, "argv", ["relqon", "run", str(tmp_path), "--full"])
+    # The full flag is accepted and report generation remains available.
+    monkeypatch.setattr(cli, "run_pytest", lambda project_path: {
+        "name": "Pytest unit tests", "status": "PASS", "duration_seconds": 0.0,
+        "error": None, "output": "tests passed",
+    })
+    monkeypatch.setattr(cli, "test_python_failure_detection", lambda: {
+        "name": "Python failure detection test", "status": "PASS",
+        "duration_seconds": 0.0, "error": None,
+    })
+    monkeypatch.setattr(cli, "test_failure_detection", lambda project_path: {
+        "name": "Docker failure detection test", "status": "PASS",
+        "duration_seconds": 0.0, "error": None,
+    })
+
+    assert cli.main() == 0
