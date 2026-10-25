@@ -9,8 +9,7 @@
 - **Docker** — build validation when Docker configuration changes.
 - **Kubernetes** — validation for changed Kubernetes manifests and Helm metadata.
 - **Terraform** — formatting and configuration validation for changed Terraform files.
-- **Pytest** — runs the project's unit tests.
-- **Failure-detection self-tests** — checks expected Python and Docker failure detection.
+- **Pytest and failure-detection self-tests** — available in optional full mode; not run during the lightweight default scan.
 
 Checks that require an unavailable tool may be marked `SKIPPED`; recovery guidance is included where available.
 
@@ -96,6 +95,13 @@ sh scripts/setup.sh
 ./.venv/bin/relqon run .
 ```
 
+The default command is a **lightweight on-demand scan**: it detects changed files, runs only relevant validators, prints a concise summary, and writes `reports/validation-report.json`. It does not run Relqon's own test suite or intentional failure simulations each time.
+
+To run the slower full checks as well:
+
+```bash
+relqon run . --full
+
 **macOS**
 
 Use the same commands as Ubuntu/Linux. Make sure Python 3.10+ is installed.
@@ -140,7 +146,7 @@ The summary includes:
 
 - Total number of checks, with **passed**, **failed**, and **skipped** counts.
 - A `[PASS]`, `[FAIL]`, or `[SKIP]` label for each check and its duration.
-- Short error details for failed checks, with concise failing-test information when available.
+- Short error details for failed checks, including compiler diagnostics from Node.js/TypeScript build failures when available.
 - Suggested recovery steps for failures, plus the reason a check was skipped.
 - A final overall result so engineers can quickly see whether to investigate a failure or continue.
 
@@ -166,7 +172,7 @@ RESULT: FAIL - Fix the failed check(s) above, then run Relqon again.
 ====================================================================
 ```
 
-The console output is a quick summary, not a replacement for full diagnostics. See the JSON report for structured details, and review the underlying tool output when the exact root cause is not obvious.
+The console output is a quick summary, not a replacement for full diagnostics. Node.js/TypeScript compiler output is included for failed build steps. See the JSON report for structured details, and review the underlying tool output when the exact root cause is not obvious.
 
 ## JSON report
 
